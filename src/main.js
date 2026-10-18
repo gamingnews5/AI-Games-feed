@@ -755,6 +755,9 @@ function videoOf(card) {
   return card?.querySelector('video.clip');
 }
 
+/** Transparent poster so in-app WebViews (X, etc.) don't paint their grey play icon over our screenshot. */
+const BLANK_POSTER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
 function posterOf(card) {
   return card?.querySelector('.poster');
 }
@@ -806,6 +809,7 @@ function ensureClipBg(card) {
   bg.setAttribute('webkit-playsinline', '');
   bg.setAttribute('muted', '');
   bg.preload = 'auto';
+  bg.poster = BLANK_POSTER;
   bg.disablePictureInPicture = true;
   bg.setAttribute('aria-hidden', 'true');
   bg.tabIndex = -1;
@@ -1784,7 +1788,9 @@ function buildCard(game, index) {
       class="clip"
       data-src="${escapeHtml(game.video)}"
       playsinline
+      webkit-playsinline
       preload="none"
+      poster="${BLANK_POSTER}"
       disablepictureinpicture
     ></video>
     <button type="button" class="mute-control" aria-pressed="${effectiveMuted() ? 'true' : 'false'}" aria-label="${effectiveMuted() ? 'Unmute video' : 'Mute video'}" title="${effectiveMuted() ? 'Unmute video' : 'Mute video'}">
