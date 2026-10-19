@@ -156,6 +156,7 @@ function letterboxFitEnabled() {
 }
 
 function syncFitToggleTitle() {
+  document.body.classList.toggle('fit-letterbox', letterboxFitEnabled());
   const logo = document.querySelector('.logo');
   if (!logo) return;
   const mode = readFitMode();
@@ -1750,7 +1751,7 @@ function buildCard(game, index) {
   if (game.iframe === true) card.dataset.iframe = 'true';
 
   const screenshot = game.screenshot
-    ? `<img class="poster ken-burns" src="${escapeHtml(game.screenshot)}" alt="" decoding="async" draggable="false" />`
+    ? `<div class="poster-fill" aria-hidden="true" style="background-image:url(&quot;${escapeHtml(game.screenshot)}&quot;)"></div><img class="poster ken-burns" src="${escapeHtml(game.screenshot)}" alt="" decoding="async" draggable="false" />`
     : `<div class="poster poster-fallback ken-burns" aria-hidden="true"></div>`;
 
   const desc = game.description

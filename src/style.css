@@ -1287,3 +1287,31 @@ body.play-overlay-open .feed {
   font-size: 16px;
   cursor: pointer;
 }
+
+/* Fit (full-frame) mode: screenshots also show whole, over a blurred fill of themselves. */
+.card .poster-fill {
+  position: absolute;
+  inset: 0;
+  background: #111 center / cover no-repeat;
+  transform: scale(1.14);
+  filter: blur(28px) brightness(0.42);
+  z-index: 0;
+  pointer-events: none;
+  display: none;
+}
+body.fit-letterbox .card .poster-fill {
+  display: block;
+}
+body.fit-letterbox .card .poster {
+  object-fit: contain;
+  background: transparent;
+  animation: none;
+  transform: none;
+}
+body.fit-letterbox .card.letterbox:not(.bg-ready) .poster {
+  filter: none;
+  transform: none;
+}
+body.fit-letterbox .card.letterbox:not(.bg-ready) .poster.hidden {
+  opacity: 0;
+}
