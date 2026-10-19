@@ -69,6 +69,22 @@ npm run preview
 
 Static output is in `dist/`.
 
+## Deploy (no GitHub Actions)
+
+The site is built locally and the contents of `dist/` are pushed to the
+`gh-pages` branch of [grootbot-dev/AI-Games-feed](https://github.com/grootbot-dev/AI-Games-feed)
+(GitHub Pages: branch `gh-pages`, root). Actions are CI-only; there is no deploy workflow.
+
+```bash
+npm ci && npm run build && cp dist/index.html dist/404.html
+# then commit dist/ to gh-pages and push
+```
+
+`games.omgithub.com` is served by the Cloudflare Worker in `cloudflare/worker.js`
+(route `games.omgithub.com/*`), which proxies `grootbot-dev.github.io/AI-Games-feed`
+because GitHub still has the custom domain claimed by the old SubmitGame Pages site.
+The zone's HTML no-cache rules and the lolgames.net 301s are unchanged.
+
 ## Resume, seen, auto-advance
 
 - **Last position** — `localStorage` key `opus-feed-last-id` (also `?g=`).
@@ -93,7 +109,7 @@ Static output is in `dist/`.
 | Repo | Role |
 |------|------|
 | [SubmitGame/Claude-vs-ChatGPT](https://github.com/SubmitGame/Claude-vs-ChatGPT) | Catalog + videos/screenshots (SoT) |
-| [SubmitGame/AI-Games-feed](https://github.com/SubmitGame/AI-Games-feed) | This feed UI |
+| [grootbot-dev/AI-Games-feed](https://github.com/grootbot-dev/AI-Games-feed) | This feed UI (moved from SubmitGame/AI-Games-feed) |
 
 ## License / contributions
 
