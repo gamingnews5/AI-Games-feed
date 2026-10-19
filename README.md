@@ -4,7 +4,7 @@ TikTok-style vertical feed of **AI-made browser games** — Claude, ChatGPT/Astr
 
 Live site: **[games.omgithub.com](https://games.omgithub.com/)**. The former **lolgames.net** URL 301-redirects here.
 
-Live catalog source of truth: **[SubmitGame/Claude-vs-ChatGPT](https://github.com/SubmitGame/Claude-vs-ChatGPT)** (`data/grokgames.json`). This app does **not** ship the catalog; it fetches raw GitHub at runtime.
+Live catalog source of truth: **[aigamedevs/Claude-vs-ChatGPT](https://github.com/aigamedevs/Claude-vs-ChatGPT)** (`data/grokgames.json`). This app does **not** ship the catalog; it fetches raw GitHub at runtime.
 
 ## Preview
 
@@ -37,14 +37,14 @@ Runtime feed loads games from GitHub raw — **no `npm run build:feed` copy step
 **Catalog:**
 
 ```
-https://raw.githubusercontent.com/SubmitGame/Claude-vs-ChatGPT/main/data/grokgames.json
+https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main/data/grokgames.json
 ```
 
 Relative media (`video_path`, `videos[].path`, screenshots) resolve to:
 
 ```
-https://raw.githubusercontent.com/SubmitGame/Claude-vs-ChatGPT/main/videos/<file>.mp4
-https://raw.githubusercontent.com/SubmitGame/Claude-vs-ChatGPT/main/screenshots/<file>.jpg
+https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main/videos/<file>.mp4
+https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main/screenshots/<file>.jpg
 ```
 
 Client mapping lives in `src/feed-from-catalog.js` (platforms, authors, likes,
@@ -53,7 +53,7 @@ hourly Overheard pushes show within ~minutes (GitHub raw CDN is ~`max-age=300`).
 
 CORS: `raw.githubusercontent.com` returns `Access-Control-Allow-Origin: *`.
 If the direct JSON fetch ever fails CORS, Vite dev retries the same
-SubmitGame catalog through `/catalog-proxy/...` (see `vite.config.js`).
+aigamedevs catalog through `/catalog-proxy/...` (see `vite.config.js`).
 
 `public/games.json` is **not** the source of truth. Optional offline rebuild:
 `npm run build:feed` / `npm run build:feed:offline` (air-gapped demos only).
@@ -109,7 +109,7 @@ live in Cloudflare and are unchanged.
 
 | Repo | Role |
 |------|------|
-| [SubmitGame/Claude-vs-ChatGPT](https://github.com/SubmitGame/Claude-vs-ChatGPT) | Catalog + videos/screenshots (SoT) |
+| [aigamedevs/Claude-vs-ChatGPT](https://github.com/aigamedevs/Claude-vs-ChatGPT) | Catalog + videos/screenshots (SoT) |
 | [grootbot-dev/AI-Games-feed](https://github.com/grootbot-dev/AI-Games-feed) | This feed UI (moved from SubmitGame/AI-Games-feed) |
 
 ## License / contributions

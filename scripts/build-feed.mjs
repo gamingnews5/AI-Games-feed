@@ -2,7 +2,7 @@
 /**
  * OFFLINE DEMO BUILDER — not the feed source of truth.
  *
- * Architecture A (default): the browser fetches the SubmitGame catalog
+ * Architecture A (default): the browser fetches the aigamedevs catalog
  * and maps cards in src/feed-from-catalog.js.
  *
  * This script still rebuilds public/games.json from a local catalog +

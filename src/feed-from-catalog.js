@@ -3,25 +3,25 @@
  * Used at runtime in the browser (catalog JSON on GitHub raw; videos on R2).
  */
 
-/** Sole catalog and media source: SubmitGame/Claude-vs-ChatGPT. */
+/** Sole catalog and media source: aigamedevs/Claude-vs-ChatGPT. */
 export const CATALOG_SOURCE = {
-  name: 'SubmitGame/Claude-vs-ChatGPT',
+  name: 'aigamedevs/Claude-vs-ChatGPT',
   catalog:
-    'https://raw.githubusercontent.com/SubmitGame/Claude-vs-ChatGPT/main/data/grokgames.json',
-  rawBase: 'https://raw.githubusercontent.com/SubmitGame/Claude-vs-ChatGPT/main/',
+    'https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main/data/grokgames.json',
+  rawBase: 'https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main/',
   proxy: '/catalog-proxy/data/grokgames.json',
 };
 
 export const CATALOG_URL = CATALOG_SOURCE.catalog;
 
-/** Screenshots / non-video media: SubmitGame catalog on GitHub raw. */
+/** Screenshots / non-video media: aigamedevs catalog on GitHub raw. */
 export let REPO_RAW_BASE = CATALOG_SOURCE.rawBase;
 
 /** Gameplay videos + posters on Cloudflare R2 (public.dev). */
 export const VIDEO_RAW_BASE =
   'https://pub-f8a67dd028134c809667b629ac5ff178.r2.dev/';
 
-/** Vite-dev proxy for the same SubmitGame catalog when direct fetch fails. */
+/** Vite-dev proxy for the same aigamedevs catalog when direct fetch fails. */
 export const CATALOG_PROXY_URL = CATALOG_SOURCE.proxy;
 
 const MADE_WITH_ALLOWED = new Set(['opus-5.5', 'sonnet-5.5', 'astra', 'gemini-4-argon']);
@@ -396,7 +396,7 @@ export function mapCatalogToFeed(data) {
 }
 
 /**
- * Fetch the SubmitGame catalog directly, then retry the same catalog through
+ * Fetch the aigamedevs catalog directly, then retry the same catalog through
  * the Vite dev proxy if direct CORS access fails.
  * Uses cache: 'no-cache' so hourly Overheard pushes show up promptly.
  */

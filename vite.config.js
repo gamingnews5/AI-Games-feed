@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import { resolve } from 'node:path'
 
 /**
- * Default: browser fetches the SubmitGame catalog directly from
+ * Default: browser fetches the aigamedevs catalog directly from
  * raw.githubusercontent.com. The /catalog-proxy route retries that same
  * catalog only when direct access fails during Vite development.
  *
@@ -25,7 +25,7 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       '/catalog-proxy': {
-        target: 'https://raw.githubusercontent.com/SubmitGame/Claude-vs-ChatGPT/main',
+        target: 'https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main',
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/catalog-proxy/, ''),
       },
