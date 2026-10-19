@@ -69,21 +69,22 @@ npm run preview
 
 Static output is in `dist/`.
 
-## Deploy (no GitHub Actions)
+## Deploy (Cloudflare Pages, direct upload)
 
-The site is built locally and the contents of `dist/` are pushed to the
-`gh-pages` branch of [grootbot-dev/AI-Games-feed](https://github.com/grootbot-dev/AI-Games-feed)
-(GitHub Pages: branch `gh-pages`, root). Actions are CI-only; there is no deploy workflow.
+`games.omgithub.com` is the custom domain of the Cloudflare Pages project
+**games-omgithub-feed** (<https://games-omgithub-feed.pages.dev>). It is a
+direct-upload project: the site is built locally and `dist/` is uploaded. There
+is no GitHub Actions deploy and the Pages project is not connected to GitHub.
 
 ```bash
-npm ci && npm run build && cp dist/index.html dist/404.html
-# then commit dist/ to gh-pages and push
+CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... scripts/deploy-cf-pages.sh
+# = npm ci && npm run build, add 404.html/_redirects/_headers, then
+#   npx wrangler pages deploy dist --project-name games-omgithub-feed --branch main
 ```
 
-`games.omgithub.com` is served by the Cloudflare Worker in `cloudflare/worker.js`
-(route `games.omgithub.com/*`), which proxies `grootbot-dev.github.io/AI-Games-feed`
-because GitHub still has the custom domain claimed by the old SubmitGame Pages site.
-The zone's HTML no-cache rules and the lolgames.net 301s are unchanged.
+`_headers` keeps HTML no-cache and `/assets/*` immutable; `_redirects` sends
+`/stats` to `/stats/`. The zone's HTML no-cache rules and the lolgames.net 301s
+live in Cloudflare and are unchanged.
 
 ## Resume, seen, auto-advance
 
