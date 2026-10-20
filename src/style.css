@@ -1299,31 +1299,31 @@ body.play-overlay-open .feed {
   pointer-events: none;
   display: none;
 }
-body.fit-letterbox .card .poster-fill {
+html.fit-letterbox .card .poster-fill {
   display: block;
 }
-body.fit-letterbox .card .poster {
+html.fit-letterbox .card .poster {
   object-fit: contain;
   background: transparent;
   animation: none;
   transform: none;
 }
-body.fit-letterbox .card.letterbox:not(.bg-ready) .poster {
+html.fit-letterbox .card.letterbox:not(.bg-ready) .poster {
   filter: none;
   transform: none;
 }
-body.fit-letterbox .card.letterbox:not(.bg-ready) .poster.hidden {
+html.fit-letterbox .card.letterbox:not(.bg-ready) .poster.hidden {
   opacity: 0;
 }
 /* Ken Burns zoom (up to 1.12x) would crop a contained screenshot; the base
    `.card .poster.ken-burns:not(.hidden)` rule outranks the fit override above. */
-body.fit-letterbox .card .poster.ken-burns:not(.hidden) {
+html.fit-letterbox .card .poster.ken-burns:not(.hidden) {
   animation: none;
   transform: none;
 }
 /* Clip already showing but its blurred bg copy isn't: hide the sharp poster
    (its aspect can differ from the clip and peek out); .poster-fill is the blur. */
-body.fit-letterbox .card.letterbox.video-ready:not(.bg-ready) .poster {
+html.fit-letterbox .card.letterbox.video-ready:not(.bg-ready) .poster {
   opacity: 0;
 }
 /* Once the moving blurred clip-bg is ready, don't cover it with the static fill
@@ -1331,6 +1331,13 @@ body.fit-letterbox .card.letterbox.video-ready:not(.bg-ready) .poster {
 .card .poster-fill {
   transition: opacity 0.25s ease;
 }
-body.fit-letterbox .card.letterbox.bg-ready .poster-fill {
+html.fit-letterbox .card.letterbox.bg-ready .poster-fill {
   opacity: 0;
+}
+
+/* Fit mode: the foreground clip is always contained (portrait / near-portrait
+   clips included), even before metadata arrives, so there is no snap from a
+   cropped first frame to contained. Cover mode keeps object-fit: cover. */
+html.fit-letterbox .card .clip {
+  object-fit: contain;
 }

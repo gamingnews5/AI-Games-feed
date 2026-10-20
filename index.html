@@ -14,6 +14,10 @@
     <meta name="twitter:title" content="AI Games Feed — Claude vs ChatGPT" />
     <meta name="twitter:description" content="Swipe through AI-made browser games." />
     <title>AI Games Feed — Claude vs ChatGPT</title>
+    <script>
+      // Apply persisted fit mode before first paint so screenshots never flash cropped.
+      try { if (localStorage.getItem('opus-feed-fit-mode') === 'letterbox') document.documentElement.classList.add('fit-letterbox'); } catch (_) {}
+    </script>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>

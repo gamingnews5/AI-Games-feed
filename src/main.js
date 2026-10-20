@@ -156,7 +156,9 @@ function letterboxFitEnabled() {
 }
 
 function syncFitToggleTitle() {
-  document.body.classList.toggle('fit-letterbox', letterboxFitEnabled());
+  const fit = letterboxFitEnabled();
+  document.documentElement.classList.toggle('fit-letterbox', fit);
+  document.body.classList.toggle('fit-letterbox', fit);
   const logo = document.querySelector('.logo');
   if (!logo) return;
   const mode = readFitMode();
@@ -781,7 +783,7 @@ function suppressVideoContextMenu(el) {
   );
 }
 
-/** True when contain would not letterbox (portrait clip on phone, landscape in wide window). */
+/** True only when the clip's aspect matches the card's (within 1%), so contain leaves no bars in either direction. */
 function clipFillsCard(video, card) {
   const vw = video?.videoWidth || 0;
   const vh = video?.videoHeight || 0;
@@ -789,8 +791,8 @@ function clipFillsCard(video, card) {
   const cw = card?.clientWidth || 0;
   const ch = card?.clientHeight || 0;
   if (!cw || !ch) return true;
-  // Wider than the card → contain leaves bars; use letterbox + blur fill.
-  return vw / vh <= cw / ch + 0.02;
+  // Wider OR narrower than the card → contain leaves bars; use letterbox + blur fill.
+  return Math.abs(vw / vh / (cw / ch) - 1) <= 0.01;
 }
 
 function ensureClipBg(card) {
