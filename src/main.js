@@ -976,6 +976,10 @@ function isPlaying(video) {
 function setPosterVisible(card, visible) {
   if (!card) return;
   card.classList.toggle('video-ready', !visible);
+  if (!visible) {
+    card.dataset.played = '1';
+    if (loadRotate?.card === card) stopLoadRotate({ toClip: true });
+  }
   const poster = posterOf(card);
   if (!poster) return;
   // Letterbox: keep poster as blurred cover fill until the bg clip is ready.
@@ -1333,6 +1337,100 @@ function resumeActiveMedia() {
   resumeSlides();
 }
 
+/* ---------- Clip cards: rotate screenshots while the clip loads ---------- */
+
+/** { card, i (0 = poster, k = extra k-1), timer, loadTimer } for the active clip card. */
+let loadRotate = null;
+
+function loadSlidesOf(card) {
+  return card?.querySelector('.load-slides') || null;
+}
+
+function loadSlideReady(slide) {
+  const img = slide?.querySelector('.slide-img');
+  return Boolean(img && img.getAttribute('src') && img.complete && img.naturalWidth > 0);
+}
+
+/** Lazily attach one extra screenshot (never more than the next one). */
+function loadExtra(card, k) {
+  const slide = loadSlidesOf(card)?.querySelectorAll('.slide')[k];
+  if (!slide) return;
+  const img = slide.querySelector('.slide-img');
+  if (img && !img.getAttribute('src') && img.dataset.src) img.src = img.dataset.src;
+  const fill = slide.querySelector('.slide-fill');
+  if (fill && fill.dataset.bg && !fill.style.backgroundImage) {
+    fill.style.backgroundImage = `url("${fill.dataset.bg}")`;
+  }
+}
+
+function stopLoadRotate({ toClip = false } = {}) {
+  const r = loadRotate;
+  if (!r) return;
+  loadRotate = null;
+  clearTimeout(r.timer);
+  clearTimeout(r.loadTimer);
+  const { card } = r;
+  const layer = loadSlidesOf(card);
+  const showing = layer?.querySelector('.slide.on');
+  const reset = () => {
+    layer?.querySelectorAll('.slide').forEach((s) => s.classList.remove('on', 'kb'));
+    card.classList.remove('load-rotated');
+  };
+  if (toClip && showing && card.classList.contains('load-rotated')) {
+    // Clip fades in over the current screenshot, then the layer is cleared.
+    setTimeout(() => {
+      if (loadRotate?.card !== card) reset();
+    }, SLIDE_FADE_MS + 100);
+  } else {
+    reset();
+  }
+}
+
+function loadRotateTick() {
+  const r = loadRotate;
+  if (!r) return;
+  r.timer = setTimeout(loadRotateTick, SLIDE_MS);
+  if (r.card.classList.contains('video-ready')) return stopLoadRotate({ toClip: true });
+  // Same pause rules as slideshow cards: hold, hidden tab, overlays, Play.
+  if (slidesBlocked()) return;
+  const slides = loadSlidesOf(r.card).querySelectorAll('.slide');
+  const n = slides.length + 1;
+  const next = (r.i + 1) % n;
+  // Only move to an extra screenshot once it has actually loaded.
+  if (next > 0 && !loadSlideReady(slides[next - 1])) {
+    loadExtra(r.card, next - 1);
+    return;
+  }
+  r.i = next;
+  slides.forEach((s, k) => {
+    const on = k === next - 1;
+    s.classList.toggle('on', on);
+    if (on) restartClass(s, 'kb');
+  });
+  if (next > 0) r.card.classList.add('load-rotated');
+  // Prefetch only the following extra.
+  if (next < slides.length) loadExtra(r.card, next);
+}
+
+/**
+ * Active clip card that cannot play yet: rotate poster + screenshots every
+ * SLIDE_MS. Never advances the feed; stops once the clip has frames, and never
+ * restarts on a mid-play stall (card.dataset.played).
+ */
+function syncLoadSlides() {
+  const card = cards()[activeIndex];
+  if (loadRotate && loadRotate.card !== card) stopLoadRotate();
+  cards().forEach((c, i) => {
+    if (i !== activeIndex && c.dataset.played) delete c.dataset.played;
+  });
+  if (!card || !loadSlidesOf(card) || loadRotate?.card === card) return;
+  if (card.classList.contains('video-ready') || card.dataset.played) return;
+  loadRotate = { card, i: 0, timer: 0, loadTimer: 0 };
+  // Give the clip request a head start before fetching the first extra.
+  loadRotate.loadTimer = setTimeout(() => loadExtra(card, 0), 1200);
+  loadRotate.timer = setTimeout(loadRotateTick, SLIDE_MS);
+}
+
 function windowEnd() {
   return Math.min(activeIndex + PRELOAD_WINDOW - 1, cards().length - 1);
 }
@@ -1460,6 +1558,7 @@ function setActiveIndex(next) {
   }
   syncActivePlayback();
   syncSlides();
+  syncLoadSlides();
   maybeAdvancePipeline();
   if (changed) rememberActiveGame();
 }
@@ -1985,6 +2084,22 @@ function slidesHtml(urls) {
   return `<div class="slides" style="--slide-ms:${slideDuration(n)}ms;--slide-fade-ms:${SLIDE_FADE_MS}ms">${slides}</div>${progress}`;
 }
 
+/**
+ * Clip cards with extra screenshots: deferred slides stacked over the poster,
+ * rotated while the clip is still loading (see syncLoadSlides).
+ */
+function loadSlidesHtml(game) {
+  const extras = Array.isArray(game.shots) ? game.shots.filter((u) => u && u !== game.screenshot) : [];
+  if (!game.video || !extras.length) return '';
+  const slides = extras
+    .map((u) => {
+      const url = escapeHtml(u);
+      return `<div class="slide"><div class="slide-fill" aria-hidden="true" data-bg="${url}"></div><img class="slide-img" data-src="${url}" alt="" decoding="async" draggable="false" /></div>`;
+    })
+    .join('');
+  return `<div class="load-slides" aria-hidden="true" style="--slide-ms:${SLIDE_MS}ms;--slide-fade-ms:${SLIDE_FADE_MS}ms">${slides}</div>`;
+}
+
 function buildCard(game, index) {
   const card = document.createElement('article');
   card.className = 'card';
@@ -1998,7 +2113,7 @@ function buildCard(game, index) {
   const screenshot = slides
     ? slidesHtml(slides)
     : game.screenshot
-    ? `<div class="poster-fill" aria-hidden="true" style="background-image:url(&quot;${escapeHtml(game.screenshot)}&quot;)"></div><img class="poster ken-burns" src="${escapeHtml(game.screenshot)}" alt="" decoding="async" draggable="false" />`
+    ? `<div class="poster-fill" aria-hidden="true" style="background-image:url(&quot;${escapeHtml(game.screenshot)}&quot;)"></div><img class="poster ken-burns" src="${escapeHtml(game.screenshot)}" alt="" decoding="async" draggable="false" />${loadSlidesHtml(game)}`
     : `<div class="poster poster-fallback ken-burns" aria-hidden="true"></div>`;
 
   const desc = game.description
@@ -2653,6 +2768,7 @@ function tearDownVideos() {
     detachSrc(video);
   });
   stopSlides();
+  stopLoadRotate();
   slidesEndCardHeld = false;
   slidesMediaPaused = false;
   pipelineTip = -1;

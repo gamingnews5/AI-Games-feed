@@ -1468,3 +1468,20 @@ html.fit-letterbox .card .slide:nth-child(even).kb .slide-img {
     animation: none;
   }
 }
+
+/* ---------- Clip cards: screenshots rotate over the poster while loading ---------- */
+.card .load-slides {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* After rotating, the clip crossfades in over the current screenshot. */
+.card.load-rotated .clip {
+  opacity: 0;
+  transition: opacity var(--slide-fade-ms, 700ms) ease;
+}
+.card.load-rotated.video-ready .clip {
+  opacity: 1;
+}

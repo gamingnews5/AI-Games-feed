@@ -383,6 +383,8 @@ export function mapCatalogToFeed(data) {
     };
     // No clip: the card plays its screenshots as a slideshow instead.
     if (!video) entry.slides = slides;
+    // Clip cards: poster + extra screenshots rotate while the clip loads.
+    else if (slides.length > 1) entry.shots = slides;
     if (platforms) entry.platforms = platforms;
     const engine = typeof g.engine === 'string' ? g.engine.trim() : '';
     if (engine && !/^(unknown|uncertain|n\/a|none)$/i.test(engine)) entry.engine = engine;
