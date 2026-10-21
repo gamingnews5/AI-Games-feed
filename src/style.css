@@ -1341,3 +1341,130 @@ html.fit-letterbox .card.letterbox.bg-ready .poster-fill {
 html.fit-letterbox .card .clip {
   object-fit: contain;
 }
+
+/* ---------- Screenshot-only cards (no clip): slideshow ---------- */
+.card .slides {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  cursor: pointer;
+  /* Vertical drags belong to the feed; a stationary tap is handled in JS. */
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  background: #111;
+}
+.card .slide {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity var(--slide-fade-ms, 700ms) ease;
+  pointer-events: none;
+}
+.card .slide.on {
+  opacity: 1;
+}
+.card .slide-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform-origin: center center;
+  will-change: transform;
+  pointer-events: none;
+}
+.card .slide-fill {
+  position: absolute;
+  inset: 0;
+  background: #111 center / cover no-repeat;
+  transform: scale(1.14);
+  filter: blur(28px) brightness(0.42);
+  display: none;
+}
+/* Gentle Ken Burns per screenshot; lasts through the crossfade out. */
+.card .slide.kb .slide-img {
+  animation: slideKenBurns calc(var(--slide-ms, 3000ms) + var(--slide-fade-ms, 700ms)) ease-in-out forwards;
+}
+.card .slide:nth-child(even).kb .slide-img {
+  animation-name: slideKenBurnsAlt;
+}
+@keyframes slideKenBurns {
+  from { transform: scale(1.02) translate(0, 0); }
+  to { transform: scale(1.1) translate(-1.5%, -1%); }
+}
+@keyframes slideKenBurnsAlt {
+  from { transform: scale(1.1) translate(1.5%, 0.5%); }
+  to { transform: scale(1.02) translate(0, 0); }
+}
+/* Fit mode: whole screenshot over a blurred fill of itself; zoom stays ≤1x so
+   the contained image is never cropped. */
+html.fit-letterbox .card .slide-fill {
+  display: block;
+}
+html.fit-letterbox .card .slide-img {
+  object-fit: contain;
+}
+html.fit-letterbox .card .slide.kb .slide-img {
+  animation-name: slideKenBurnsFit;
+}
+html.fit-letterbox .card .slide:nth-child(even).kb .slide-img {
+  animation-name: slideKenBurnsFitAlt;
+}
+@keyframes slideKenBurnsFit {
+  from { transform: scale(0.94) translate(0, 0); }
+  to { transform: scale(1) translate(0, 0); }
+}
+@keyframes slideKenBurnsFitAlt {
+  from { transform: scale(1) translate(0, 0); }
+  to { transform: scale(0.94) translate(0, 0); }
+}
+
+/* Thin segmented progress (multi-screenshot cards only). */
+.card .slide-progress {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+  z-index: 3;
+  display: flex;
+  gap: 4px;
+  pointer-events: none;
+}
+.card .slide-progress i {
+  flex: 1;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.28);
+  overflow: hidden;
+}
+.card .slide-progress b {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: rgba(255, 255, 255, 0.9);
+}
+.card .slide-progress i.done b {
+  width: 100%;
+}
+.card .slide-progress i.run b {
+  animation: slideSeg var(--slide-ms, 3000ms) linear forwards;
+}
+.card.slides-card .slide-progress {
+  --slide-ms: 3000ms;
+}
+@keyframes slideSeg {
+  from { width: 0; }
+  to { width: 100%; }
+}
+.card.slides-paused .slide.kb .slide-img,
+.card.slides-paused .slide-progress i.run b {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .card .slide.kb .slide-img {
+    animation: none;
+  }
+}

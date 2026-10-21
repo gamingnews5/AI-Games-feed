@@ -92,6 +92,33 @@ export function resolveRepoAssetUrl(raw, { preferFolder } = {}) {
   return base + rel;
 }
 
+/**
+ * All screenshot URLs for a game, in catalog order and deduped: the primary
+ * screenshot field first, then screenshots[] (strings or { path }).
+ */
+export function extractScreenshotUrls(g) {
+  if (!g || typeof g !== 'object') return [];
+  const raws = [];
+  for (const key of ['screenshot_path', 'screenshot', 'poster']) {
+    if (typeof g[key] === 'string' && g[key].trim()) {
+      raws.push(g[key]);
+      break;
+    }
+  }
+  if (Array.isArray(g.screenshots)) {
+    for (const item of g.screenshots) {
+      const p = typeof item === 'string' ? item : item?.path || item?.url || item?.src;
+      if (typeof p === 'string' && p.trim()) raws.push(p);
+    }
+  }
+  const out = [];
+  for (const raw of raws) {
+    const url = resolveRepoAssetUrl(raw, { preferFolder: 'screenshots' });
+    if (url && /\.(png|jpe?g|webp|gif|avif)(?:[?#]|$)/i.test(url) && !out.includes(url)) out.push(url);
+  }
+  return out;
+}
+
 /** First playable video relative path from catalog game fields. */
 export function extractVideoRel(g) {
   if (!g || typeof g !== 'object') return null;
@@ -294,7 +321,7 @@ function passComments(g, entry) {
 
 /**
  * Map a raw catalog document to the feed payload shape consumed by main.js.
- * Only games with a playable video + play_url are included.
+ * Games need a play_url plus a clip, or at least one screenshot (slideshow card).
  */
 export function mapCatalogToFeed(data) {
   function normalizeTags(raw) {
@@ -319,23 +346,16 @@ export function mapCatalogToFeed(data) {
   const feed = [];
   for (const g of sorted) {
     const videoRel = extractVideoRel(g);
-    if (!videoRel) continue;
+    const video = !videoRel
+      ? null
+      : /^https?:\/\//i.test(videoRel)
+        ? videoRel
+        : resolveRepoAssetUrl(videoRel, { preferFolder: 'videos' });
+    const slides = extractScreenshotUrls(g);
+    // Clip cards need a video; screenshot-only cards need ≥1 screenshot.
+    if (!video && !slides.length) continue;
 
-    const video = /^https?:\/\//i.test(videoRel)
-      ? videoRel
-      : resolveRepoAssetUrl(videoRel, { preferFolder: 'videos' });
-    if (!video) continue;
-
-    let screenshot = null;
-    let shotRaw = g.screenshot_path || g.screenshot || g.poster || null;
-    if (!shotRaw && Array.isArray(g.screenshots) && g.screenshots.length) {
-      const first = g.screenshots[0];
-      shotRaw = typeof first === 'string' ? first : first?.path;
-    }
-    if (shotRaw) {
-      screenshot = resolveRepoAssetUrl(shotRaw, { preferFolder: 'screenshots' });
-    }
-
+    const screenshot = slides[0] || null;
     const platforms = inferPlatforms(g);
     const { author, github_user, x_handle, avatar_url } = inferAuthor(g);
     const { published_at, listed_at, first_seen, last_seen } =
@@ -361,10 +381,15 @@ export function mapCatalogToFeed(data) {
       video,
       made_with,
     };
+    // No clip: the card plays its screenshots as a slideshow instead.
+    if (!video) entry.slides = slides;
     if (platforms) entry.platforms = platforms;
     const engine = typeof g.engine === 'string' ? g.engine.trim() : '';
     if (engine && !/^(unknown|uncertain|n\/a|none)$/i.test(engine)) entry.engine = engine;
     const tags = normalizeTags(g.tags);
+    // Multi-screenshot cards (no clip) are filterable as ?tag=screenshots even
+    // before the catalog tags them.
+    if (!video && slides.length >= 2 && !tags.includes('screenshots')) tags.push('screenshots');
     if (tags.length) entry.tags = tags;
     if (author) entry.author = author;
     if (github_user) entry.github_user = github_user;
@@ -373,6 +398,7 @@ export function mapCatalogToFeed(data) {
     if (typeof g.iframe === 'boolean') entry.iframe = g.iframe;
     // Native (non-browser) games: Download replaces Play.
     if (g.browser_playable === false) entry.browser_playable = false;
+    if (g.requires_own_files === true) entry.requires_own_files = true;
     if (typeof g.download_url === 'string' && /^https?:\/\//.test(g.download_url)) {
       entry.download_url = g.download_url;
     }

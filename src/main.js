@@ -42,6 +42,11 @@ const BUFFER_AHEAD_SEC = 2.5;
  * first natural `ended`.
  */
 const MIN_WATCH_BEFORE_ADVANCE = 10;
+/** Screenshot-only cards: time per screenshot (multi) / for a lone screenshot. */
+const SLIDE_MS = 3000;
+const SINGLE_SLIDE_MS = 4000;
+/** Crossfade between screenshots (matches .slide opacity transition). */
+const SLIDE_FADE_MS = 700;
 
 let allGames = [];
 let catalogCount = 0;
@@ -407,12 +412,28 @@ function seenTs(game) {
 }
 
 /**
- * Sort games.
+ * Sort games: fixed feedGroup() order, then within a group
  * Top: screenshot_score desc.
  * New: last_seen desc → listed_at/first_seen desc → published_at desc →
  * id asc → video_mtime desc → remote_likes desc. Never falls back to score
  * (so New stays distinct when many games share a batch day).
  */
+/**
+ * Fixed feed groups (Top/New only sort inside a group):
+ * 1 browser games with a sourced clip, 2 self-recorded clips (tag rec),
+ * 3 ROM / own-files / download games with a clip, 4 screenshot slideshows
+ * (≥2 screenshots or tag screenshots), 5 single-image cards.
+ */
+function feedGroup(g) {
+  const tags = Array.isArray(g.tags) ? g.tags : [];
+  if (g.video) {
+    if (g.requires_own_files === true || g.browser_playable === false || tags.includes('rom')) return 3;
+    return tags.includes('rec') ? 2 : 1;
+  }
+  const n = Array.isArray(g.slides) ? g.slides.length : 0;
+  return n >= 2 || tags.includes('screenshots') ? 4 : 5;
+}
+
 function sortGames(games, mode) {
   const list = games.slice();
   if (mode === SORT_NEW) {
@@ -434,6 +455,8 @@ function sortGames(games, mode) {
   } else {
     list.sort((a, b) => (b.screenshot_score ?? -1) - (a.screenshot_score ?? -1));
   }
+  // Stable: keeps the Top/New order inside each group.
+  list.sort((a, b) => feedGroup(a) - feedGroup(b));
   return list;
 }
 
@@ -501,6 +524,9 @@ function platformTags(platforms) {
   return out;
 }
 
+/** Friendly chip / header labels for catalog tags (slug stays the filter key). */
+const TAG_LABELS = { rec: 'Recorded', screenshots: 'Screenshots' };
+
 const MADE_LABELS = { 'opus-5.5': 'Opus 5.5', 'sonnet-5.5': 'Sonnet 5.5', astra: 'Astra', 'gemini-4-argon': 'Gemini 4 Argon' };
 
 function madeWithTag(made) {
@@ -513,6 +539,7 @@ function tagLabel(tag) {
   if (tag === 'pc') return 'PC';
   if (tag === 'mobile') return 'Mobile';
   if (MADE_LABELS[tag]) return MADE_LABELS[tag];
+  if (TAG_LABELS[tag]) return TAG_LABELS[tag];
   return tag;
 }
 
@@ -727,6 +754,15 @@ function endCardIsActive() {
 
 function syncEndCardPlayback() {
   const list = cards();
+  if (slidesOf(list[list.length - 1]) && activeIndex === list.length - 1) {
+    const held = endCardIsActive();
+    if (held !== slidesEndCardHeld) {
+      slidesEndCardHeld = held;
+      if (held) pauseSlides();
+      else resumeSlides();
+    }
+    return;
+  }
   const lastVideo = videoOf(list[list.length - 1]);
   if (!lastVideo || activeIndex !== list.length - 1) return;
 
@@ -1105,6 +1141,198 @@ function wireVideo(video) {
   });
 }
 
+/* ---------- Screenshot-only cards: slideshow ---------- */
+
+/** Slideshow of the active screenshot card (only one runs at a time). */
+let slideshow = null;
+/** Finger/mouse held on the active screenshot card. */
+let slideHold = false;
+/** Paused by Play / Download like a clip's video.pause(). */
+let slidesMediaPaused = false;
+/** End card scrolled into view below the last (screenshot) card. */
+let slidesEndCardHeld = false;
+
+function slidesOf(card) {
+  return card?.querySelector('.slides') || null;
+}
+
+function slideDuration(n) {
+  return n > 1 ? SLIDE_MS : SINGLE_SLIDE_MS;
+}
+
+/** Attach the image (and blurred fill) for slide i if it is still deferred. */
+function loadSlide(card, i) {
+  const slide = card?.querySelectorAll('.slide')[i];
+  if (!slide) return;
+  const img = slide.querySelector('.slide-img');
+  if (img && !img.getAttribute('src') && img.dataset.src) img.src = img.dataset.src;
+  const fill = slide.querySelector('.slide-fill');
+  if (fill && fill.dataset.bg && !fill.style.backgroundImage) {
+    fill.style.backgroundImage = `url("${fill.dataset.bg}")`;
+  }
+}
+
+function restartClass(el, cls) {
+  el.classList.remove(cls);
+  void el.offsetWidth; // restart CSS animation
+  el.classList.add(cls);
+}
+
+function showSlide(card, i) {
+  const slides = card.querySelectorAll('.slide');
+  slides.forEach((s, k) => {
+    s.classList.toggle('on', k === i);
+    if (k === i) restartClass(s, 'kb');
+  });
+  // Keep the outgoing slide's motion running through the crossfade.
+  const keep = i;
+  setTimeout(() => {
+    slides.forEach((s, k) => {
+      if (k !== keep && !s.classList.contains('on')) s.classList.remove('kb');
+    });
+  }, SLIDE_FADE_MS + 50);
+  card.querySelectorAll('.slide-progress i').forEach((seg, k) => {
+    seg.classList.toggle('done', k < i);
+    if (k === i) restartClass(seg, 'run');
+    else seg.classList.remove('run');
+  });
+  loadSlide(card, i);
+  loadSlide(card, i + 1); // preload the next screenshot
+}
+
+function slidesBlocked() {
+  return (
+    document.visibilityState === 'hidden' ||
+    playOverlayOpen ||
+    slideHold ||
+    slidesMediaPaused ||
+    slidesEndCardHeld
+  );
+}
+
+function stopSlides() {
+  if (!slideshow) return;
+  clearTimeout(slideshow.timer);
+  const { card } = slideshow;
+  card.classList.remove('slides-paused');
+  card.querySelectorAll('.slide').forEach((s, k) => {
+    s.classList.toggle('on', k === 0);
+    s.classList.remove('kb');
+  });
+  card.querySelectorAll('.slide-progress i').forEach((seg) => seg.classList.remove('run', 'done'));
+  slideshow = null;
+}
+
+function runSlides() {
+  const s = slideshow;
+  if (!s || s.timer) return;
+  if (slidesBlocked()) {
+    s.card.classList.add('slides-paused');
+    return;
+  }
+  s.card.classList.remove('slides-paused');
+  s.t0 = performance.now();
+  s.timer = setTimeout(onSlideTimer, Math.max(0, s.remaining));
+}
+
+function pauseSlides() {
+  const s = slideshow;
+  if (!s) return;
+  if (s.timer) {
+    clearTimeout(s.timer);
+    s.timer = 0;
+    s.remaining = Math.max(0, s.remaining - (performance.now() - s.t0));
+  }
+  s.card.classList.add('slides-paused');
+}
+
+function resumeSlides() {
+  if (!slideshow || slidesBlocked()) return;
+  runSlides();
+}
+
+/** Start (or restart, when the card is re-entered) the active card's slideshow. */
+function startSlides(card) {
+  stopSlides();
+  const n = card.querySelectorAll('.slide').length;
+  if (!n) return;
+  slideshow = { card, n, i: 0, remaining: slideDuration(n), t0: 0, timer: 0 };
+  showSlide(card, 0);
+  runSlides();
+}
+
+function onSlideTimer() {
+  const s = slideshow;
+  if (!s) return;
+  s.timer = 0;
+  if (s.i < s.n - 1) {
+    s.i += 1;
+    s.remaining = slideDuration(s.n);
+    showSlide(s.card, s.i);
+    runSlides();
+    return;
+  }
+  onSlidesEnded();
+}
+
+/** Last screenshot done: advance exactly like a clip's `ended`, else loop. */
+function onSlidesEnded() {
+  const s = slideshow;
+  const idx = Number(s.card.dataset.index);
+  const canAdvance =
+    idx === activeIndex &&
+    document.visibilityState !== 'hidden' &&
+    !commentsOpen &&
+    !playOverlayOpen &&
+    !autoAdvancePaused &&
+    activeIndex + 1 < cards().length;
+  if (canAdvance) {
+    advanceToNext();
+    return;
+  }
+  // Not allowed to move on yet (comments open, Play suppressed, last game):
+  // keep cycling like a short looping clip.
+  s.i = 0;
+  s.remaining = slideDuration(s.n);
+  showSlide(s.card, 0);
+  runSlides();
+}
+
+/** Active screenshot card runs its slideshow; everything else is stopped. */
+function syncSlides() {
+  const card = cards()[activeIndex];
+  if (!slidesOf(card)) {
+    stopSlides();
+    return;
+  }
+  if (slideshow?.card !== card) {
+    slidesMediaPaused = false;
+    startSlides(card);
+  }
+}
+
+/** Pause whatever the active card shows (clip or slideshow), e.g. before Play. */
+function pauseActiveMedia() {
+  const video = videoOf(cards()[activeIndex]);
+  if (video) {
+    video.pause();
+    return;
+  }
+  slidesMediaPaused = true;
+  pauseSlides();
+}
+
+/** Resume the active card (clip: tryPlay; slideshow: continue its timer). */
+function resumeActiveMedia() {
+  const video = videoOf(cards()[activeIndex]);
+  if (video) {
+    tryPlay(video);
+    return;
+  }
+  slidesMediaPaused = false;
+  resumeSlides();
+}
+
 function windowEnd() {
   return Math.min(activeIndex + PRELOAD_WINDOW - 1, cards().length - 1);
 }
@@ -1131,17 +1359,21 @@ function maybeAdvancePipeline() {
     }
   }
 
-  // Grow tip forward while prior is ready enough.
+  // Screenshot-only card as current: nothing to buffer, so the chain may grow.
+  if (!curVideo) pipelineTip = Math.max(pipelineTip, activeIndex);
+
+  // Grow tip forward while prior is ready enough (cards without a clip count as ready).
   while (pipelineTip < maxTip) {
     const tip = Math.max(pipelineTip, activeIndex);
     const tipVideo = videoOf(list[tip]);
     const ready =
-      tip === activeIndex
+      !tipVideo ||
+      (tip === activeIndex
         ? isPlaying(tipVideo) || canStartPlayback(tipVideo)
-        : hasEnoughBuffer(tipVideo) || isPlaying(tipVideo);
+        : hasEnoughBuffer(tipVideo) || isPlaying(tipVideo));
 
     if (!ready && tip > activeIndex) break;
-    if (tip === activeIndex && !isPlaying(tipVideo) && !canStartPlayback(tipVideo)) {
+    if (tipVideo && tip === activeIndex && !isPlaying(tipVideo) && !canStartPlayback(tipVideo)) {
       // Still waiting on current — don't open further slots yet,
       // but current already has src above.
       break;
@@ -1154,8 +1386,8 @@ function maybeAdvancePipeline() {
     pipelineTip = next;
 
     // Only open one new slot per readiness gate; loop continues if that
-    // slot is already buffered (e.g. after scroll back).
-    if (!hasEnoughBuffer(nextVideo) && !isPlaying(nextVideo)) break;
+    // slot is already buffered (e.g. after scroll back) or has no clip.
+    if (nextVideo && !hasEnoughBuffer(nextVideo) && !isPlaying(nextVideo)) break;
   }
 
   // Detach anything outside the sliding window.
@@ -1227,6 +1459,7 @@ function setActiveIndex(next) {
     warmPlayNavigation(list[i]?.dataset.url);
   }
   syncActivePlayback();
+  syncSlides();
   maybeAdvancePipeline();
   if (changed) rememberActiveGame();
 }
@@ -1733,6 +1966,25 @@ function buildEndCard() {
   return card;
 }
 
+/** Screenshot-only card media: stacked slides (first eager, rest deferred) + progress. */
+function slidesHtml(urls) {
+  const n = urls.length;
+  const slides = urls
+    .map((u, i) => {
+      const url = escapeHtml(u);
+      const fill = i === 0
+        ? `style="background-image:url(&quot;${url}&quot;)"`
+        : `data-bg="${url}"`;
+      const img = i === 0 ? `src="${url}"` : `data-src="${url}"`;
+      return `<div class="slide${i === 0 ? ' on' : ''}"><div class="slide-fill" aria-hidden="true" ${fill}></div><img class="slide-img" ${img} alt="" decoding="async" draggable="false" /></div>`;
+    })
+    .join('');
+  const progress = n > 1
+    ? `<div class="slide-progress" aria-hidden="true">${'<i><b></b></i>'.repeat(n)}</div>`
+    : '';
+  return `<div class="slides" style="--slide-ms:${slideDuration(n)}ms;--slide-fade-ms:${SLIDE_FADE_MS}ms">${slides}</div>${progress}`;
+}
+
 function buildCard(game, index) {
   const card = document.createElement('article');
   card.className = 'card';
@@ -1741,7 +1993,11 @@ function buildCard(game, index) {
   card.dataset.url = game.play_url;
   if (game.iframe === true) card.dataset.iframe = 'true';
 
-  const screenshot = game.screenshot
+  const slides = !game.video && Array.isArray(game.slides) ? game.slides : null;
+  if (slides) card.classList.add('slides-card');
+  const screenshot = slides
+    ? slidesHtml(slides)
+    : game.screenshot
     ? `<div class="poster-fill" aria-hidden="true" style="background-image:url(&quot;${escapeHtml(game.screenshot)}&quot;)"></div><img class="poster ken-burns" src="${escapeHtml(game.screenshot)}" alt="" decoding="async" draggable="false" />`
     : `<div class="poster poster-fallback ken-burns" aria-hidden="true"></div>`;
 
@@ -1776,7 +2032,7 @@ function buildCard(game, index) {
 
   card.innerHTML = `
     ${screenshot}
-    <video
+    ${slides ? '' : `<video
       class="clip"
       data-src="${escapeHtml(game.video)}"
       playsinline
@@ -1784,8 +2040,8 @@ function buildCard(game, index) {
       preload="none"
       poster="${BLANK_POSTER}"
       disablepictureinpicture
-    ></video>
-    <button type="button" class="mute-control" aria-pressed="${effectiveMuted() ? 'true' : 'false'}" aria-label="${effectiveMuted() ? 'Unmute video' : 'Mute video'}" title="${effectiveMuted() ? 'Unmute video' : 'Mute video'}">
+    ></video>`}
+    ${slides ? '' : `<button type="button" class="mute-control" aria-pressed="${effectiveMuted() ? 'true' : 'false'}" aria-label="${effectiveMuted() ? 'Unmute video' : 'Mute video'}" title="${effectiveMuted() ? 'Unmute video' : 'Mute video'}">
       <svg class="icon-muted" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 9v6h4l5 4V5L8 9H4Z"/>
         <path d="M16.5 10.5a3 3 0 0 1 0 3"/>
@@ -1794,7 +2050,7 @@ function buildCard(game, index) {
         <path d="M4 9v6h4l5 4V5L8 9H4Z"/>
         <path d="M17 8.5a5 5 0 0 1 0 7M19.5 6a8.5 8.5 0 0 1 0 12"/>
       </svg>
-    </button>
+    </button>`}
     <div class="card-body">
       <div class="badges">
         <span class="score">${escapeHtml(scoreLabel(game.screenshot_score))}</span>
@@ -1838,7 +2094,7 @@ function buildCard(game, index) {
   `;
 
   const muteBtn = card.querySelector('.mute-control');
-  muteBtn.addEventListener('click', (e) => {
+  muteBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
     setMutedPreference(!effectiveMuted());
   });
@@ -1968,9 +2224,7 @@ function openPlayOverlay(url, title = 'Play game') {
   playOverlayOpen = true;
   autoAdvancePaused = true;
   watchAccumSec = 0;
-  const list = cards();
-  const video = videoOf(list[activeIndex]);
-  if (video) video.pause();
+  pauseActiveMedia();
 
   playFrameEl.title = title || 'Play game';
   playFrameEl.src = url;
@@ -2010,9 +2264,7 @@ function closePlayOverlay({ immediate = false } = {}) {
     // Resume feed video + auto-advance after Exit.
     autoAdvancePaused = false;
     watchAccumSec = 0;
-    const list = cards();
-    const video = videoOf(list[activeIndex]);
-    if (video) tryPlay(video);
+    resumeActiveMedia();
   };
   if (immediate) finish();
   else setTimeout(finish, 180);
@@ -2024,9 +2276,19 @@ function closePlayOverlay({ immediate = false } = {}) {
  * that must NOT cancel the hold timer, or a hold after scrolling looks like a no-op.
  */
 function wireActiveVideoTap(card, game) {
-  const video = videoOf(card);
+  // Clip cards: the <video>. Screenshot cards: the slideshow layer.
+  const video = videoOf(card) || slidesOf(card);
   if (!video) return;
   suppressVideoContextMenu(video);
+  const isSlides = video.classList.contains('slides');
+  // Touch on a screenshot card holds the slideshow until release.
+  const releaseSlides = () => {
+    if (!isSlides || !slideHold) return;
+    slideHold = false;
+    window.removeEventListener('pointerup', releaseSlides, true);
+    window.removeEventListener('pointercancel', releaseSlides, true);
+    if (slideshow?.card === card) resumeSlides();
+  };
   const LONG_PRESS_MS = 450;
   let tapArmed = false; // short-tap → Play
   let holdAlive = false; // long-press timer still eligible
@@ -2068,6 +2330,12 @@ function wireActiveVideoTap(card, game) {
     'pointerdown',
     (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (isSlides && slideshow?.card === card) {
+        slideHold = true;
+        pauseSlides();
+        window.addEventListener('pointerup', releaseSlides, true);
+        window.addEventListener('pointercancel', releaseSlides, true);
+      }
       tapArmed = true;
       holdAlive = true;
       longPressFired = false;
@@ -2165,9 +2433,7 @@ function playGame(gameOrUrl, maybeTitle) {
   else {
     autoAdvancePaused = true;
     watchAccumSec = 0;
-    const list = cards();
-    const video = videoOf(list[activeIndex]);
-    if (video) video.pause();
+    pauseActiveMedia();
     openGame(url);
   }
 }
@@ -2183,8 +2449,7 @@ function wireDownloadButton(btn, game) {
     analytics.track('download', { game_id: game.id });
     autoAdvancePaused = true;
     watchAccumSec = 0;
-    const video = videoOf(cards()[activeIndex]);
-    if (video) video.pause();
+    pauseActiveMedia();
     openGame(game.download_url);
   });
 }
@@ -2224,8 +2489,7 @@ function wirePlayButton(btn, game) {
     analytics.track('play_tab', { game_id: game.id });
     autoAdvancePaused = true;
     watchAccumSec = 0;
-    const video = videoOf(cards()[activeIndex]);
-    if (video) video.pause();
+    pauseActiveMedia();
     openGame(url);
   });
   btn.addEventListener('pointermove', (e) => {
@@ -2388,6 +2652,9 @@ function tearDownVideos() {
     video.pause();
     detachSrc(video);
   });
+  stopSlides();
+  slidesEndCardHeld = false;
+  slidesMediaPaused = false;
   pipelineTip = -1;
   activeIndex = 0;
 }
@@ -2431,7 +2698,7 @@ function renderFeed(mode, mobileOnly, { restore = true, landId = '' } = {}) {
   // Scroll up: already seen, oldest at the top. Scroll down: not yet seen.
   games = orderSeenHistoryAbove(games, anchorId);
   const likes = likeCount();
-  const videoCount = allGames.length;
+  const videoCount = allGames.filter((g) => g.video).length;
   const videoLabel = `${videoCount} ${videoCount === 1 ? 'video' : 'videos'}`;
   countEl.textContent =
     likes > 0 ? `${catalogCount} games · ${likes}♥` : `${catalogCount} games`;
@@ -2686,7 +2953,7 @@ async function init() {
     : 0;
 
   allGames = (Array.isArray(data.games) ? data.games : []).filter(
-    (g) => g?.video && g?.play_url && g?.id,
+    (g) => (g?.video || g?.slides?.length) && g?.play_url && g?.id,
   );
 
   wireAudioGesture();
@@ -2761,10 +3028,11 @@ function wireVisibility() {
   document.addEventListener('visibilitychange', () => {
     const list = cards();
     const video = videoOf(list[activeIndex]);
-    if (!video) return;
+    if (!video && !slideshow) return;
     if (document.visibilityState === 'hidden') {
       // Pause playback + auto-advance while backgrounded.
-      video.pause();
+      if (video) video.pause();
+      else pauseSlides();
     } else {
       // Stay paused while comments or iframe Play overlay is open.
       if (commentsOpen || playOverlayOpen) return;
@@ -2774,7 +3042,7 @@ function wireVisibility() {
         watchAccumSec = 0;
         autoAdvancePaused = false;
       }
-      tryPlay(video);
+      resumeActiveMedia();
     }
   });
 }
