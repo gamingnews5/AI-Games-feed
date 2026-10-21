@@ -387,8 +387,19 @@ export function mapCatalogToFeed(data) {
     else if (slides.length > 1) entry.shots = slides;
     if (platforms) entry.platforms = platforms;
     const engine = typeof g.engine === 'string' ? g.engine.trim() : '';
-    if (engine && !/^(unknown|uncertain|n\/a|none)$/i.test(engine)) entry.engine = engine;
     const tags = normalizeTags(g.tags);
+    // Engine chip: hide Three.js (too common to be a useful chip/filter) and
+    // engines already shown as a site tag (e.g. engine "Crayon" + tag "crayon").
+    // The catalog keeps the engine field either way.
+    const engSlug = engine.toLowerCase().replace(/[\s.-]+/g, '');
+    if (
+      engine &&
+      !/^(unknown|uncertain|n\/a|none)$/i.test(engine) &&
+      engSlug !== 'threejs' &&
+      !tags.some((t) => t.replace(/-/g, '') === engSlug)
+    ) {
+      entry.engine = engine;
+    }
     // Multi-screenshot cards (no clip) are filterable as ?tag=screenshots even
     // before the catalog tags them.
     if (!video && slides.length >= 2 && !tags.includes('screenshots')) tags.push('screenshots');
