@@ -3,6 +3,7 @@ import {
   REPO_RAW_BASE,
 } from './feed-from-catalog.js';
 import * as analytics from './analytics.js';
+import { searchGames, queryWords } from './search.js';
 
 const feedEl = document.getElementById('feed');
 const countEl = document.getElementById('count');
@@ -464,30 +465,17 @@ function searchFromUrl() {
 let activeSearch = searchFromUrl();
 
 function searchWords(q) {
-  return String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  return queryWords(q);
 }
 
-/** Haystack: title, creator handles, engine, tags, platform and model labels. */
-function searchText(g) {
-  return [
-    g.title,
-    g.author,
-    g.github_user,
-    g.x_handle,
-    g.engine,
-    ...gameTags(g),
-    ...gameTags(g).map(tagLabel),
-    g.description,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-}
-
-function matchesSearch(g, words) {
-  if (!words.length) return true;
-  const hay = searchText(g);
-  return words.every((w) => hay.includes(w.replace(/^@/, '')));
+/** Searchable fields: core (title, creator handles, engine, tags/labels) is also
+ *  used for typo-tolerant matching; description is exact-match only. */
+function searchFields(g) {
+  const tags = gameTags(g);
+  return {
+    core: [g.title, g.author, g.github_user, g.x_handle, g.engine, ...tags, ...tags.map(tagLabel)],
+    extra: [g.description],
+  };
 }
 
 /** Tags a card can be filtered by: catalog tags plus the engine name. */
@@ -537,16 +525,17 @@ function chipHtml(tag, label, extraClass = '') {
 function filterGames(games, mobileOnly) {
   let list = games;
   if (activeTag) list = list.filter((g) => gameTags(g).includes(activeTag));
-  const words = searchWords(activeSearch);
-  if (words.length) list = list.filter((g) => matchesSearch(g, words));
   if (!mobileOnly) return list;
   return list.filter(
     (g) => Array.isArray(g.platforms) && g.platforms.includes('mobile'),
   );
 }
 
+/** Sort by the current mode, then (when searching) exact matches before fuzzy ones. */
 function visibleGames(mode, mobileOnly) {
-  return sortGames(filterGames(allGames, mobileOnly), mode);
+  const sorted = sortGames(filterGames(allGames, mobileOnly), mode);
+  if (!searchWords(activeSearch).length) return sorted;
+  return searchGames(sorted, activeSearch, searchFields).list;
 }
 
 function deepLinkIdFromUrl() {
@@ -2578,10 +2567,9 @@ function applySearch(q) {
   if (next === activeSearch) return;
   const wasEmpty = !activeSearch;
   activeSearch = next;
-  const words = searchWords(next);
   const pool = visibleGames(readSortMode(), readMobileOnly());
-  const first = pool.find((g) => matchesSearch(g, words));
-  if (next) analytics.trackSearch(next, pool.filter((g) => matchesSearch(g, words)).length);
+  const first = pool[0];
+  if (next) analytics.trackSearch(next, pool.length);
   const id = first?.id || '';
   try {
     const url = publicUrlFor(id).toString();
