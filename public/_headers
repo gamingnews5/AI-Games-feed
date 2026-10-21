@@ -1,0 +1,8 @@
+/*
+  Cache-Control: no-cache, must-revalidate
+  Expires: 0
+
+/assets/*
+  ! Cache-Control
+  ! Expires
+  Cache-Control: public, max-age=31536000, immutable

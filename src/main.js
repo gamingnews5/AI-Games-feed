@@ -4,6 +4,7 @@ import {
 } from './feed-from-catalog.js';
 import * as analytics from './analytics.js';
 import { searchGames, queryWords } from './search.js';
+import { siteFor, isKnownHost, gameCanonicalUrl, MAIN_ORIGIN } from './sites.js';
 
 const feedEl = document.getElementById('feed');
 const countEl = document.getElementById('count');
@@ -28,7 +29,10 @@ const SORT_NEW = 'new';
 /** Cover = old cropped full-bleed; letterbox = contain + blurred bg fill. */
 const FIT_COVER = 'cover';
 const FIT_LETTERBOX = 'letterbox';
-const PUBLIC_SITE_ORIGIN = 'https://games.omgithub.com';
+/** Per-domain branding (lolgames.net, games.omgithub.com, ...). */
+const SITE = siteFor(window.location.hostname);
+/** Share links stay on the current domain; previews/localhost share the main site. */
+const PUBLIC_SITE_ORIGIN = isKnownHost(window.location.hostname) ? window.location.origin : MAIN_ORIGIN;
 
 /** Max videos with src attached (current + ahead). */
 const PRELOAD_WINDOW = 5;
@@ -171,8 +175,8 @@ function syncFitToggleTitle() {
   logo.setAttribute(
     'aria-label',
     mode === FIT_LETTERBOX
-      ? 'AI Games Feed — full frame mode. Tap for cropped cover.'
-      : 'AI Games Feed — cropped cover mode. Tap for full frame.',
+      ? `${SITE.name} — full frame mode. Tap for cropped cover.`
+      : `${SITE.name} — cropped cover mode. Tap for full frame.`,
   );
 }
 
@@ -591,7 +595,8 @@ function shareUrlFor(id) {
 function syncCanonicalUrl(id = '') {
   const canonical = document.querySelector('link[rel="canonical"]');
   const ogUrl = document.querySelector('meta[property="og:url"]');
-  const url = publicUrlFor(id).toString();
+  // Game pages: one main copy on games.omgithub.com. Home: this site itself.
+  const url = id ? gameCanonicalUrl(id) : `${SITE.origin}/`;
   if (canonical) canonical.href = url;
   if (ogUrl) ogUrl.content = url;
 }
@@ -2099,8 +2104,8 @@ function showToast(msg) {
 
 async function shareGame(game) {
   const url = shareUrlFor(game.id);
-  const title = game.title || 'AI Games Feed';
-  const text = `Play ${title} on AI Games Feed`;
+  const title = game.title || SITE.name;
+  const text = `Play ${title} on ${SITE.name}`;
   if (navigator.share) {
     try {
       await navigator.share({ title, text, url });
@@ -3198,7 +3203,27 @@ function wireMobileFilter() {
   });
 }
 
+/** Apply per-domain title/name before anything else touches the DOM. */
+function applySiteBranding() {
+  try {
+    if (document.title !== SITE.title) document.title = SITE.title;
+    const logo = document.querySelector('.logo');
+    if (logo && logo.textContent !== SITE.name) logo.textContent = SITE.name;
+    const set = (sel, attr, value) => {
+      const el = document.querySelector(sel);
+      if (el && value && el.getAttribute(attr) !== value) el.setAttribute(attr, value);
+    };
+    set('meta[name="description"]', 'content', SITE.description);
+    set('meta[property="og:title"]', 'content', SITE.title);
+    set('meta[property="og:description"]', 'content', SITE.description);
+    set('meta[property="og:site_name"]', 'content', SITE.name);
+    set('meta[name="twitter:title"]', 'content', SITE.title);
+    set('meta[name="twitter:description"]', 'content', SITE.description);
+  } catch (_) {}
+}
+
 async function init() {
+  applySiteBranding();
   syncCanonicalUrl(deepLinkIdFromUrl());
   let data;
   try {
