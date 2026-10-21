@@ -60,7 +60,13 @@
     <div id="playOverlay" class="play-overlay" hidden aria-hidden="true">
       <div class="play-overlay-bar">
         <button type="button" class="play-overlay-exit" data-close-play>Exit</button>
+        <button type="button" class="play-overlay-fs" data-fs-play aria-pressed="false" title="Fullscreen">⛶ Fullscreen</button>
         <a class="play-overlay-open" data-open-play href="#" target="_blank" rel="noopener noreferrer">Open ↗</a>
+      </div>
+      <button type="button" class="play-overlay-handle" data-fs-handle hidden aria-label="Show controls" title="Show controls">⌃</button>
+      <div class="play-overlay-hint" data-play-hint hidden>
+        <a href="#" data-hint-open target="_blank" rel="noopener noreferrer">Blank screen? Open in new tab ↗</a>
+        <button type="button" data-hint-close aria-label="Dismiss">×</button>
       </div>
       <iframe
         id="playFrame"

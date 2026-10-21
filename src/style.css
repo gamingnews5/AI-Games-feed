@@ -1485,3 +1485,108 @@ html.fit-letterbox .card .slide:nth-child(even).kb .slide-img {
 .card.load-rotated.video-ready .clip {
   opacity: 1;
 }
+
+/* ⛶ Fullscreen toggle (between Exit and Open). */
+.play-overlay-fs {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  white-space: nowrap;
+}
+.play-overlay-fs:active {
+  transform: scale(0.97);
+}
+.play-overlay-fs[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+/* Pseudo-fullscreen (no element fullscreen API): bar hidden, game fills the
+   visual viewport, a small corner handle brings the bar back. */
+.play-overlay.pseudo-fs {
+  inset: auto;
+  top: var(--vvt, 0px);
+  left: 0;
+  width: 100vw;
+  height: var(--vvh, 100dvh);
+}
+.play-overlay.pseudo-fs .play-overlay-bar {
+  display: none;
+}
+.play-overlay-handle {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  right: calc(8px + env(safe-area-inset-right, 0px));
+  z-index: 3;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 16px;
+  line-height: 34px;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0.55;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.play-overlay-handle:active {
+  opacity: 1;
+}
+.play-overlay-handle[hidden] {
+  display: none;
+}
+
+/* "Blank screen?" hint for embeds the catalog hasn't verified. */
+.play-overlay-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transform: translate(-50%, 8px);
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  padding: 4px 4px 4px 14px;
+  border-radius: 999px;
+  background: rgba(10, 10, 12, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.play-overlay-hint.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.play-overlay-hint[hidden] {
+  display: none;
+}
+.play-overlay-hint a {
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+}
+.play-overlay-hint button {
+  appearance: none;
+  border: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: #fff;
+  background: transparent;
+  font-size: 18px;
+  cursor: pointer;
+}
