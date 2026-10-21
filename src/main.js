@@ -880,9 +880,8 @@ function posterOf(card) {
 }
 
 function clipBgOf(card) {
-  return card?.querySelector('video.clip-bg');
+  return card?.querySelector('.clip-bg');
 }
-
 /** Block Chrome's native video long-press menu on feed clips only. */
 function suppressVideoContextMenu(el) {
   if (!el || el.__ctxMenuSuppressed) return;
@@ -909,75 +908,107 @@ function clipFillsCard(video, card) {
   return Math.abs(vw / vh / (cw / ch) - 1) <= 0.01;
 }
 
+/*
+ * Blurred cover fill behind a contain-fit clip: frames of the main <video> drawn
+ * into a tiny canvas (CSS blur scales it up). No second network download.
+ */
+const BG_CANVAS_W = 48;
+const BG_FPS = 12;
+const bgLoop = { card: null, raf: 0, last: 0 };
+
 function ensureClipBg(card) {
   let bg = clipBgOf(card);
-  if (bg) {
-    suppressVideoContextMenu(bg);
-    return bg;
-  }
-  const video = videoOf(card);
-  if (!video) return null;
-  bg = document.createElement('video');
+  if (bg) return bg;
+  if (!videoOf(card)) return null;
+  bg = document.createElement('canvas');
   bg.className = 'clip-bg';
-  bg.muted = true;
-  bg.defaultMuted = true;
-  bg.playsInline = true;
-  bg.setAttribute('playsinline', '');
-  bg.setAttribute('webkit-playsinline', '');
-  bg.setAttribute('muted', '');
-  bg.preload = 'auto';
-  bg.poster = BLANK_POSTER;
-  bg.disablePictureInPicture = true;
   bg.setAttribute('aria-hidden', 'true');
-  bg.tabIndex = -1;
   card.insertBefore(bg, card.firstChild);
-  suppressVideoContextMenu(bg);
   return bg;
+}
+
+/** Draw the current clip frame, cover-cropped to the card aspect. */
+function drawClipBg(card) {
+  const video = videoOf(card);
+  const bg = clipBgOf(card);
+  if (!video || !bg || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return false;
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh) return false;
+  const cw = card.clientWidth || 1;
+  const ch = card.clientHeight || 1;
+  const w = BG_CANVAS_W;
+  const h = Math.max(1, Math.round((BG_CANVAS_W * ch) / cw));
+  if (bg.width !== w) bg.width = w;
+  if (bg.height !== h) bg.height = h;
+  const ctx = bg.getContext('2d', { alpha: false });
+  if (!ctx) return false;
+  const scale = Math.max(w / vw, h / vh);
+  const dw = vw * scale;
+  const dh = vh * scale;
+  try {
+    ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  } catch (_) {
+    return false;
+  }
+  return true;
+}
+
+function stopBgLoop(card) {
+  if (card && bgLoop.card !== card) return;
+  if (bgLoop.raf) cancelAnimationFrame(bgLoop.raf);
+  bgLoop.raf = 0;
+  bgLoop.card = null;
+}
+
+function startBgLoop(card) {
+  if (bgLoop.card === card && bgLoop.raf) return;
+  stopBgLoop();
+  bgLoop.card = card;
+  bgLoop.last = 0;
+  const tick = (t) => {
+    if (bgLoop.card !== card) return;
+    const video = videoOf(card);
+    if (!card.classList.contains('letterbox') || !video || video.paused || video.ended) {
+      stopBgLoop(card);
+      return;
+    }
+    bgLoop.raf = requestAnimationFrame(tick);
+    if (t - bgLoop.last < 1000 / BG_FPS) return;
+    bgLoop.last = t;
+    if (drawClipBg(card)) setBgReady(card);
+  };
+  bgLoop.raf = requestAnimationFrame(tick);
+}
+
+function setBgReady(card) {
+  if (card.classList.contains('bg-ready')) return;
+  card.classList.add('bg-ready');
+  const poster = posterOf(card);
+  if (poster && card.classList.contains('video-ready')) poster.classList.add('hidden');
 }
 
 function teardownClipBg(card) {
   if (!card) return;
-  const bg = clipBgOf(card);
+  stopBgLoop(card);
   card.classList.remove('bg-ready');
-  if (!bg) return;
-  try {
-    bg.pause();
-  } catch (_) {}
-  bg.removeAttribute('src');
-  try {
-    bg.load();
-  } catch (_) {}
-  bg.remove();
+  clipBgOf(card)?.remove();
 }
 
 function syncBgPlayback(card) {
   const video = videoOf(card);
-  const bg = clipBgOf(card);
-  if (!video || !bg || !card.classList.contains('letterbox')) return;
-  bg.muted = true;
-  try {
-    const vt = video.currentTime || 0;
-    if (Math.abs((bg.currentTime || 0) - vt) > 0.3) bg.currentTime = vt;
-  } catch (_) {}
+  if (!video || !clipBgOf(card) || !card.classList.contains('letterbox')) return;
   if (!video.paused && !video.ended) {
-    const p = bg.play();
-    if (p?.catch) p.catch(() => {});
+    startBgLoop(card);
   } else {
-    try {
-      bg.pause();
-    } catch (_) {}
+    stopBgLoop(card);
+    if (drawClipBg(card)) setBgReady(card);
   }
 }
 
 function markBgReady(card) {
-  const bg = clipBgOf(card);
-  if (!bg || !card.classList.contains('letterbox')) return;
-  if (bg.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
-  card.classList.add('bg-ready');
-  const poster = posterOf(card);
-  if (poster && card.classList.contains('video-ready')) {
-    poster.classList.add('hidden');
-  }
+  if (!clipBgOf(card) || !card.classList.contains('letterbox')) return;
+  if (drawClipBg(card)) setBgReady(card);
   syncBgPlayback(card);
 }
 
@@ -1005,20 +1036,8 @@ function syncLetterbox(card, isActive) {
   }
 
   card.classList.add('letterbox');
-  const bg = ensureClipBg(card);
-  if (!bg) return;
-  const url = video.getAttribute('src') || video.dataset.src || '';
-  if (url && bg.getAttribute('src') !== url) {
-    bg.src = url;
-    try {
-      bg.load();
-    } catch (_) {}
-  }
-  const onReady = () => markBgReady(card);
-  bg.addEventListener('loadeddata', onReady);
-  bg.addEventListener('canplay', onReady);
+  if (!ensureClipBg(card)) return;
   markBgReady(card);
-  syncBgPlayback(card);
 }
 
 function syncAllLetterbox() {
@@ -1079,13 +1098,16 @@ function setPosterVisible(card, visible) {
   poster.classList.toggle('hidden', !visible && !keepAsFill);
 }
 
-function attachSrc(video) {
+function attachSrc(video, { high = false } = {}) {
   if (!video) return;
   video.muted = effectiveMuted();
   const url = video.dataset.src;
   if (!url) return;
   if (video.getAttribute('src') === url) return;
   video.preload = 'auto';
+  try {
+    video.setAttribute('fetchpriority', high ? 'high' : 'low');
+  } catch (_) {}
   video.src = url;
   try {
     video.load();
@@ -1216,12 +1238,20 @@ function wireVideo(video) {
     }
   };
   video.addEventListener('playing', onPlaying);
+  const onActiveFirstFrame = () => {
+    const card = video.closest('.card');
+    if (card && Number(card.dataset.index) === activeIndex) openFirstFrameGate();
+  };
+  video.addEventListener('playing', onActiveFirstFrame);
+  video.addEventListener('error', onActiveFirstFrame);
   video.addEventListener('canplay', onCanPlay);
   video.addEventListener('canplaythrough', onCanPlay);
   video.addEventListener('progress', onProgress);
   video.addEventListener('ended', onEnded);
   video.addEventListener('loadedmetadata', onMeta);
   video.addEventListener('timeupdate', onTimeUpdate);
+  // Paused/first frame: paint the blurred canvas fill once data is decodable.
+  video.addEventListener('loadeddata', onTimeUpdate);
   video.addEventListener('waiting', onWaiting);
   videoListeners.set(video, {
     onPlaying,
@@ -1254,11 +1284,14 @@ function slideDuration(n) {
 }
 
 /** Attach the image (and blurred fill) for slide i if it is still deferred. */
-function loadSlide(card, i) {
+function loadSlide(card, i, { high = false } = {}) {
   const slide = card?.querySelectorAll('.slide')[i];
   if (!slide) return;
   const img = slide.querySelector('.slide-img');
-  if (img && !img.getAttribute('src') && img.dataset.src) img.src = img.dataset.src;
+  if (img && !img.getAttribute('src') && img.dataset.src) {
+    img.fetchPriority = high ? 'high' : 'low';
+    img.src = img.dataset.src;
+  }
   const fill = slide.querySelector('.slide-fill');
   if (fill && fill.dataset.bg && !fill.style.backgroundImage) {
     fill.style.backgroundImage = `url("${fill.dataset.bg}")`;
@@ -1289,8 +1322,8 @@ function showSlide(card, i) {
     if (k === i) restartClass(seg, 'run');
     else seg.classList.remove('run');
   });
-  loadSlide(card, i);
-  loadSlide(card, i + 1); // preload the next screenshot
+  loadSlide(card, i, { high: Number(card.dataset.index) === activeIndex && i === 0 });
+  afterFirstFrame(() => loadSlide(card, i + 1)); // preload the next screenshot
 }
 
 function slidesBlocked() {
@@ -1515,8 +1548,9 @@ function syncLoadSlides() {
   if (!card || !loadSlidesOf(card) || loadRotate?.card === card) return;
   if (card.classList.contains('video-ready') || card.dataset.played) return;
   loadRotate = { card, i: 0, timer: 0, loadTimer: 0 };
-  // Give the clip request a head start before fetching the first extra.
-  loadRotate.loadTimer = setTimeout(() => loadExtra(card, 0), 1200);
+  // Give the clip request a head start before fetching the first extra
+  // (only fetched at all if the clip still isn't playing by then).
+  loadRotate.loadTimer = setTimeout(() => loadExtra(card, 0), LOAD_EXTRA_DELAY_MS);
   loadRotate.timer = setTimeout(loadRotateTick, SLIDE_MS);
 }
 
@@ -1539,7 +1573,7 @@ function maybeAdvancePipeline() {
   // Ensure current always has src and tries to play.
   const curVideo = videoOf(list[activeIndex]);
   if (curVideo) {
-    attachSrc(curVideo);
+    attachSrc(curVideo, { high: true });
     if (canStartPlayback(curVideo)) tryPlay(curVideo);
     if (isPlaying(curVideo) || curVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
       pipelineTip = Math.max(pipelineTip, activeIndex);
@@ -1550,7 +1584,8 @@ function maybeAdvancePipeline() {
   if (!curVideo) pipelineTip = Math.max(pipelineTip, activeIndex);
 
   // Grow tip forward while prior is ready enough (cards without a clip count as ready).
-  while (pipelineTip < maxTip) {
+  // First load: nothing else downloads until the active clip shows a frame.
+  while (pipelineTip < maxTip && firstFrameOpen) {
     const tip = Math.max(pipelineTip, activeIndex);
     const tipVideo = videoOf(list[tip]);
     const ready =
@@ -1576,6 +1611,7 @@ function maybeAdvancePipeline() {
     // slot is already buffered (e.g. after scroll back) or has no clip.
     if (nextVideo && !hasEnoughBuffer(nextVideo) && !isPlaying(nextVideo)) break;
   }
+  syncMediaWindow();
 
   // Detach anything outside the sliding window.
   list.forEach((card, i) => {
@@ -1621,6 +1657,88 @@ function rememberActiveGame() {
   syncUrlForGame(id);
 }
 
+/* ---------- First-load priority: first-frame gate + media window ---------- */
+
+/** Clip cards: first extra loading screenshot only if still not playing by then. */
+const LOAD_EXTRA_DELAY_MS = 3000;
+/** Gate opens on the active clip's first 'playing', or after these timeouts. */
+const FIRST_FRAME_STILL_TIMEOUT_MS = 3000;
+const FIRST_FRAME_CLIP_TIMEOUT_MS = 8000;
+/** Posters/fills/slide 0 attached for activeIndex-2 .. activeIndex+2 (+ chain tip). */
+const MEDIA_BEHIND = 2;
+const MEDIA_AHEAD = 2;
+
+let firstFrameOpen = false;
+let firstFrameTimer = 0;
+const afterFirstFrameQueue = [];
+
+/** Run fn once the active clip has its first frame (or the gate timed out). */
+function afterFirstFrame(fn) {
+  if (firstFrameOpen) {
+    fn();
+    return;
+  }
+  afterFirstFrameQueue.push(fn);
+}
+
+function openFirstFrameGate() {
+  if (firstFrameOpen) return;
+  firstFrameOpen = true;
+  clearTimeout(firstFrameTimer);
+  firstFrameTimer = 0;
+  const queued = afterFirstFrameQueue.splice(0);
+  for (const fn of queued) {
+    try {
+      fn();
+    } catch (_) {}
+  }
+  try {
+    maybeAdvancePipeline();
+  } catch (_) {}
+}
+
+function armFirstFrameGate() {
+  if (firstFrameOpen || firstFrameTimer) return;
+  const card = cards()[activeIndex];
+  if (!card) return;
+  const ms = videoOf(card) ? FIRST_FRAME_CLIP_TIMEOUT_MS : FIRST_FRAME_STILL_TIMEOUT_MS;
+  firstFrameTimer = setTimeout(openFirstFrameGate, ms);
+}
+
+/** Attach a card's poster + blurred fill (or slideshow slide 0). Idempotent. */
+function hydrateCardMedia(card, high) {
+  if (!card) return;
+  if (!card.dataset.mediaOn) {
+    card.dataset.mediaOn = '1';
+    const poster = card.querySelector('img.poster');
+    if (poster && !poster.getAttribute('src') && poster.dataset.src) {
+      poster.fetchPriority = high ? 'high' : 'low';
+      poster.src = poster.dataset.src;
+    }
+    const fill = card.querySelector('.poster-fill');
+    if (fill && fill.dataset.bg && !fill.style.backgroundImage) {
+      fill.style.backgroundImage = `url("${fill.dataset.bg}")`;
+    }
+    if (card.querySelector('.slides')) loadSlide(card, 0, { high });
+  }
+  if (firstFrameOpen && !card.dataset.avatarOn) {
+    card.dataset.avatarOn = '1';
+    const avatar = card.querySelector('img.avatar-img');
+    if (avatar && !avatar.getAttribute('src') && avatar.dataset.src) avatar.src = avatar.dataset.src;
+  }
+}
+
+/** Active card always; neighbors (and the next chained clip) after the first frame. */
+function syncMediaWindow() {
+  const list = cards();
+  if (!list.length) return;
+  hydrateCardMedia(list[activeIndex], true);
+  if (!firstFrameOpen) return;
+  const lo = Math.max(0, activeIndex - MEDIA_BEHIND);
+  const hi = Math.min(list.length - 1, Math.max(activeIndex + MEDIA_AHEAD, Math.min(pipelineTip + 1, windowEnd())));
+  for (let i = lo; i <= hi; i++) hydrateCardMedia(list[i], false);
+}
+
 function setActiveIndex(next) {
   const list = cards();
   if (!list.length) return;
@@ -1642,9 +1760,12 @@ function setActiveIndex(next) {
     analytics.cardEnter(id);
   }
   const warmEnd = Math.min(activeIndex + PLAY_NAV_PRELOAD_WINDOW - 1, list.length - 1);
-  for (let i = activeIndex; i <= warmEnd; i++) {
-    warmPlayNavigation(list[i]?.dataset.url);
-  }
+  const warmUrls = [];
+  for (let i = activeIndex; i <= warmEnd; i++) warmUrls.push(list[i]?.dataset.url);
+  // Play-destination prefetch never competes with the first clip.
+  afterFirstFrame(() => warmUrls.forEach(warmPlayNavigation));
+  syncMediaWindow();
+  armFirstFrameGate();
   syncActivePlayback();
   syncSlides();
   syncLoadSlides();
@@ -2075,7 +2196,7 @@ function authorRowHtml(game) {
   const hue = hueFrom(name);
   const avatarUrl = resolveAvatarUrl(game);
   const avatar = avatarUrl
-    ? `<img class="avatar-img" src="${escapeHtml(avatarUrl)}" alt="" width="36" height="36" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-fallback="${escapeHtml(initials)}" data-hue="${hue}" />`
+    ? `<img class="avatar-img" data-src="${escapeHtml(avatarUrl)}" alt="" width="36" height="36" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-fallback="${escapeHtml(initials)}" data-hue="${hue}" />`
     : `<span class="avatar-fallback" style="--hue:${hue}" aria-hidden="true">${escapeHtml(initials)}</span>`;
   const authorUrl = authorUrlFor(game);
   const tag = authorUrl ? 'a' : 'div';
@@ -2160,10 +2281,9 @@ function slidesHtml(urls) {
   const slides = urls
     .map((u, i) => {
       const url = escapeHtml(u);
-      const fill = i === 0
-        ? `style="background-image:url(&quot;${url}&quot;)"`
-        : `data-bg="${url}"`;
-      const img = i === 0 ? `src="${url}"` : `data-src="${url}"`;
+      // All slides deferred; the media window attaches slide 0 near the viewport.
+      const fill = `data-bg="${url}"`;
+      const img = `data-src="${url}"`;
       return `<div class="slide${i === 0 ? ' on' : ''}"><div class="slide-fill" aria-hidden="true" ${fill}></div><img class="slide-img" ${img} alt="" decoding="async" draggable="false" /></div>`;
     })
     .join('');
@@ -2202,7 +2322,7 @@ function buildCard(game, index) {
   const screenshot = slides
     ? slidesHtml(slides)
     : game.screenshot
-    ? `<div class="poster-fill" aria-hidden="true" style="background-image:url(&quot;${escapeHtml(game.screenshot)}&quot;)"></div><img class="poster ken-burns" src="${escapeHtml(game.screenshot)}" alt="" decoding="async" draggable="false" />${loadSlidesHtml(game)}`
+    ? `<div class="poster-fill" aria-hidden="true" data-bg="${escapeHtml(game.screenshot)}"></div><img class="poster ken-burns" data-src="${escapeHtml(game.screenshot)}" alt="" decoding="async" draggable="false" />${loadSlidesHtml(game)}`
     : `<div class="poster poster-fallback ken-burns" aria-hidden="true"></div>`;
 
   const desc = game.description

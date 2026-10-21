@@ -320,6 +320,21 @@ function passComments(g, entry) {
 }
 
 /**
+ * Clip URL + screenshot URLs for one catalog game. Shared with the Pages worker
+ * so its <link rel=preload> hints match exactly what the card requests.
+ */
+export function gameMedia(g) {
+  const videoRel = extractVideoRel(g);
+  const video = !videoRel
+    ? null
+    : /^https?:\/\//i.test(videoRel)
+      ? videoRel
+      : resolveRepoAssetUrl(videoRel, { preferFolder: 'videos' });
+  const slides = extractScreenshotUrls(g);
+  return { video, slides, poster: slides[0] || null };
+}
+
+/**
  * Map a raw catalog document to the feed payload shape consumed by main.js.
  * Games need a play_url plus a clip, or at least one screenshot (slideshow card).
  */
@@ -345,13 +360,7 @@ export function mapCatalogToFeed(data) {
 
   const feed = [];
   for (const g of sorted) {
-    const videoRel = extractVideoRel(g);
-    const video = !videoRel
-      ? null
-      : /^https?:\/\//i.test(videoRel)
-        ? videoRel
-        : resolveRepoAssetUrl(videoRel, { preferFolder: 'videos' });
-    const slides = extractScreenshotUrls(g);
+    const { video, slides } = gameMedia(g);
     // Clip cards need a video; screenshot-only cards need ≥1 screenshot.
     if (!video && !slides.length) continue;
 
@@ -439,8 +448,33 @@ export function mapCatalogToFeed(data) {
  * the Vite dev proxy if direct CORS access fails.
  * Uses cache: 'no-cache' so hourly Overheard pushes show up promptly.
  */
+/** Same-origin edge-cached catalog copy served by the Pages worker. */
+export const SAME_ORIGIN_CATALOG = '/catalog.json';
+
+function sameOriginCatalogAvailable() {
+  try {
+    const h = location.hostname;
+    return !(h === 'localhost' || h === '0.0.0.0' || /^127\./.test(h) || /^\[?::1\]?$/.test(h));
+  } catch (_) {
+    return false;
+  }
+}
+
 export async function fetchCatalogFeed() {
   const errors = [];
+  // Production: same-origin copy (no extra TLS handshake, edge cached ~5 min,
+  // preloaded from the HTML). Falls back to raw GitHub below.
+  if (sameOriginCatalogAvailable()) {
+    try {
+      const res = await fetch(SAME_ORIGIN_CATALOG, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`HTTP ${res.status} from ${SAME_ORIGIN_CATALOG}`);
+      const data = await res.json();
+      REPO_RAW_BASE = CATALOG_SOURCE.rawBase;
+      return { feed: mapCatalogToFeed(data), via: 'edge:catalog.json' };
+    } catch (err) {
+      errors.push(`${SAME_ORIGIN_CATALOG}: ${err?.message || err}`);
+    }
+  }
   try {
     const res = await fetch(CATALOG_SOURCE.catalog, { cache: 'no-cache', mode: 'cors' });
     if (!res.ok) throw new Error(`HTTP ${res.status} from raw ${CATALOG_SOURCE.name}`);
