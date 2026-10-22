@@ -740,14 +740,12 @@ body {
   min-height: 11px;
 }
 
-/* Lock feed scroll while comments sheet or play overlay is open */
-body.comments-open,
-body.play-overlay-open {
+/* Lock feed scroll while comments sheet is open */
+body.comments-open {
   overflow: hidden;
 }
 
-body.comments-open .feed,
-body.play-overlay-open .feed {
+body.comments-open .feed {
   overflow: hidden;
   touch-action: none;
 }
@@ -1118,107 +1116,6 @@ body.play-overlay-open .feed {
   transform: scale(0.97);
 }
 
-/* Fullscreen iframe Play overlay */
-.play-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: flex;
-  flex-direction: column;
-  background: #000;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.18s ease;
-}
-
-.play-overlay[hidden] {
-  display: none !important;
-}
-
-.play-overlay.open {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.play-overlay-bar {
-  position: relative;
-  z-index: 2;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 10px;
-  padding-left: calc(14px + env(safe-area-inset-left, 0px));
-  padding-right: calc(14px + env(safe-area-inset-right, 0px));
-  background: rgba(10, 10, 12, 0.92);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  pointer-events: auto;
-  touch-action: manipulation;
-}
-
-.play-overlay-exit,
-.play-overlay-open {
-  appearance: none;
-  border: none;
-  cursor: pointer;
-  font: inherit;
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 0.02em;
-  padding: 10px 16px;
-  border-radius: 999px;
-  text-decoration: none;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.12);
-  transition: background 0.15s ease, transform 0.1s ease;
-  position: relative;
-  z-index: 1;
-  touch-action: manipulation;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.play-overlay-exit:hover,
-.play-overlay-open:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.play-overlay-exit:active,
-.play-overlay-open:active {
-  transform: scale(0.97);
-}
-
-.play-overlay-exit {
-  background: var(--accent);
-  box-shadow: 0 6px 18px rgba(124, 92, 255, 0.35);
-}
-
-.play-overlay-exit:hover {
-  background: var(--accent-hover);
-}
-
-.play-overlay-frame {
-  position: relative;
-  z-index: 0;
-  flex: 1 1 auto;
-  width: 100%;
-  border: 0;
-  background: #000;
-  /* Fill remaining viewport under the bar — keep below chrome for hit-testing */
-  min-height: 0;
-}
-
-.play-overlay:fullscreen,
-.play-overlay-frame:fullscreen {
-  width: 100%;
-  height: 100%;
-  background: #000;
-  border: 0;
-}
-
 /* Tappable tag chips (filter feed by ?tag=). */
 .tag-chip {
   align-self: flex-start;
@@ -1486,107 +1383,3 @@ html.fit-letterbox .card .slide:nth-child(even).kb .slide-img {
   opacity: 1;
 }
 
-/* ⛶ Fullscreen toggle (between Exit and Open). */
-.play-overlay-fs {
-  appearance: none;
-  border: none;
-  cursor: pointer;
-  font: inherit;
-  font-weight: 700;
-  font-size: 14px;
-  padding: 10px 14px;
-  border-radius: 999px;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.12);
-  touch-action: manipulation;
-  -webkit-user-select: none;
-  user-select: none;
-  white-space: nowrap;
-}
-.play-overlay-fs:active {
-  transform: scale(0.97);
-}
-.play-overlay-fs[aria-pressed="true"] {
-  background: rgba(255, 255, 255, 0.24);
-}
-
-/* Pseudo-fullscreen (no element fullscreen API): bar hidden, game fills the
-   visual viewport, a small corner handle brings the bar back. */
-.play-overlay.pseudo-fs {
-  inset: auto;
-  top: var(--vvt, 0px);
-  left: 0;
-  width: 100vw;
-  height: var(--vvh, 100dvh);
-}
-.play-overlay.pseudo-fs .play-overlay-bar {
-  display: none;
-}
-.play-overlay-handle {
-  position: absolute;
-  top: calc(8px + env(safe-area-inset-top, 0px));
-  right: calc(8px + env(safe-area-inset-right, 0px));
-  z-index: 3;
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 999px;
-  color: #fff;
-  font-size: 16px;
-  line-height: 34px;
-  background: rgba(0, 0, 0, 0.35);
-  opacity: 0.55;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-.play-overlay-handle:active {
-  opacity: 1;
-}
-.play-overlay-handle[hidden] {
-  display: none;
-}
-
-/* "Blank screen?" hint for embeds the catalog hasn't verified. */
-.play-overlay-hint {
-  position: absolute;
-  left: 50%;
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  transform: translate(-50%, 8px);
-  opacity: 0;
-  transition: opacity 0.25s ease, transform 0.25s ease;
-  padding: 4px 4px 4px 14px;
-  border-radius: 999px;
-  background: rgba(10, 10, 12, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  font-size: 13px;
-  white-space: nowrap;
-}
-.play-overlay-hint.show {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-.play-overlay-hint[hidden] {
-  display: none;
-}
-.play-overlay-hint a {
-  color: #fff;
-  text-decoration: none;
-  font-weight: 600;
-}
-.play-overlay-hint button {
-  appearance: none;
-  border: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  color: #fff;
-  background: transparent;
-  font-size: 18px;
-  cursor: pointer;
-}

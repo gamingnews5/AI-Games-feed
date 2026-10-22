@@ -15,8 +15,6 @@ const toastEl = document.getElementById('toast');
 const commentsSheetEl = document.getElementById('commentsSheet');
 const commentsListEl = document.getElementById('commentsList');
 const commentsTitleEl = document.getElementById('commentsTitle');
-const playOverlayEl = document.getElementById('playOverlay');
-const playFrameEl = document.getElementById('playFrame');
 
 const SORT_KEY = 'opus-feed-sort';
 const MOBILE_KEY = 'opus-feed-mobile-only';
@@ -69,8 +67,6 @@ let restoring = false;
 let historySilent = false;
 /** True after the landing game replaces the current history entry. */
 let feedHistorySeeded = false;
-/** Ignore the fullscreen exit we started ourselves. */
-let fullscreenExitFromUs = false;
 /** Cumulative seconds watched on the current card (short-clip looping). */
 let watchAccumSec = 0;
 /** Game id that watchAccumSec belongs to. */
@@ -85,8 +81,6 @@ let userGestureUnlocked = false;
 let gestureWired = false;
 /** Comments bottom sheet open — pause auto-advance / feed scroll. */
 let commentsOpen = false;
-/** Fullscreen iframe Play overlay open — pause video / auto-advance. */
-let playOverlayOpen = false;
 let commentsSwipeStartY = null;
 let commentsSwipeCurrentY = 0;
 let commentsSwipeActive = false;
@@ -631,121 +625,6 @@ function pushOverlayHistory(kind) {
   } catch (_) {}
 }
 
-function requestGameFullscreen() {
-  const el = playFrameEl || playOverlayEl;
-  if (!el) return;
-  const req = el.requestFullscreen || el.webkitRequestFullscreen;
-  if (!req) return;
-  try {
-    const result = req.call(el);
-    if (result && typeof result.catch === 'function') result.catch(() => {});
-  } catch (_) {}
-}
-
-/** Overlay is in browser fullscreen (overlay or iframe element). */
-function isGameFullscreen() {
-  return Boolean(document.fullscreenElement || document.webkitFullscreenElement);
-}
-
-/** Set while the ⛶ button exits fullscreen: stay in the overlay. */
-let fsExitKeepOverlay = false;
-let pseudoFullscreen = false;
-
-/** Element fullscreen of the overlay (bar stays reachable); false if unsupported. */
-function requestOverlayFullscreen() {
-  const el = playOverlayEl;
-  const req = el && (el.requestFullscreen || el.webkitRequestFullscreen);
-  if (!req) return Promise.resolve(false);
-  try {
-    const result = req.call(el);
-    if (result && typeof result.then === 'function') return result.then(() => true, () => false);
-    // Old WebKit: no promise; check on the next frame.
-    return new Promise((r) => setTimeout(() => r(isGameFullscreen()), 300));
-  } catch (_) {
-    return Promise.resolve(false);
-  }
-}
-
-function syncVisualViewportHeight() {
-  const vv = window.visualViewport;
-  const h = vv ? vv.height : window.innerHeight;
-  playOverlayEl?.style.setProperty('--vvh', `${Math.round(h)}px`);
-  if (vv) playOverlayEl?.style.setProperty('--vvt', `${Math.round(vv.offsetTop)}px`);
-}
-
-/** iPhone Safari / in-app webviews: hide the bar, fill the visual viewport. */
-function setPseudoFullscreen(on) {
-  pseudoFullscreen = !!on && playOverlayOpen;
-  if (!playOverlayEl) return;
-  playOverlayEl.classList.toggle('pseudo-fs', pseudoFullscreen);
-  const handle = playOverlayEl.querySelector('[data-fs-handle]');
-  if (handle) handle.hidden = !pseudoFullscreen;
-  if (pseudoFullscreen) {
-    syncVisualViewportHeight();
-    window.visualViewport?.addEventListener('resize', syncVisualViewportHeight);
-    window.visualViewport?.addEventListener('scroll', syncVisualViewportHeight);
-    // Nudge mobile browsers to collapse their toolbars.
-    try {
-      window.scrollTo(0, 1);
-    } catch (_) {}
-  } else {
-    window.visualViewport?.removeEventListener('resize', syncVisualViewportHeight);
-    window.visualViewport?.removeEventListener('scroll', syncVisualViewportHeight);
-  }
-  syncFullscreenButton();
-}
-
-function syncFullscreenButton() {
-  const btn = playOverlayEl?.querySelector('[data-fs-play]');
-  if (!btn) return;
-  const on = isGameFullscreen() || pseudoFullscreen;
-  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-  btn.textContent = on ? '⛶ Exit full' : '⛶ Fullscreen';
-  btn.title = on ? 'Exit fullscreen (stay in game)' : 'Fullscreen';
-}
-
-/** ⛶ button: toggle fullscreen without leaving the overlay. */
-async function toggleOverlayFullscreen() {
-  if (!playOverlayOpen) return;
-  if (pseudoFullscreen) {
-    setPseudoFullscreen(false);
-    return;
-  }
-  if (isGameFullscreen()) {
-    fsExitKeepOverlay = true;
-    exitGameFullscreen();
-    setTimeout(() => {
-      fsExitKeepOverlay = false;
-      syncFullscreenButton();
-    }, 800);
-    return;
-  }
-  const ok = await requestOverlayFullscreen();
-  if (!ok && playOverlayOpen) setPseudoFullscreen(true);
-  syncFullscreenButton();
-}
-
-function exitGameFullscreen() {
-  const active = document.fullscreenElement || document.webkitFullscreenElement;
-  if (!active) return;
-  fullscreenExitFromUs = true;
-  const exit = document.exitFullscreen || document.webkitExitFullscreen;
-  if (!exit) {
-    fullscreenExitFromUs = false;
-    return;
-  }
-  try {
-    const result = exit.call(document);
-    const clear = () => {
-      fullscreenExitFromUs = false;
-    };
-    if (result && typeof result.then === 'function') result.then(clear, clear);
-    else requestAnimationFrame(clear);
-  } catch (_) {
-    fullscreenExitFromUs = false;
-  }
-}
-
 function goToGameFromHistory(id) {
   if (!id) return;
   const list = cards();
@@ -765,8 +644,7 @@ function goToGameFromHistory(id) {
 /** Back closes the top layer: play, then comments, then the previous game. */
 function onHistoryPop() {
   const state = history.state || {};
-  if (playOverlayOpen && state.opus !== 'play') closePlayOverlay();
-  if (commentsOpen && state.opus !== 'comments' && state.opus !== 'play') {
+  if (commentsOpen && state.opus !== 'comments') {
     closeCommentsSheet();
   }
   if (state.opus) return;
@@ -792,14 +670,6 @@ function onHistoryPop() {
   goToGameFromHistory(state.g || deepLinkIdFromUrl());
 }
 
-function dismissPlayOverlay() {
-  if (history.state && history.state.opus === 'play') {
-    history.back();
-    return;
-  }
-  closePlayOverlay();
-}
-
 function dismissCommentsSheet() {
   if (history.state && history.state.opus === 'comments') {
     history.back();
@@ -810,20 +680,6 @@ function dismissCommentsSheet() {
 
 function wireHistoryNavigation() {
   window.addEventListener('popstate', onHistoryPop);
-  const onFullscreenEnd = () => {
-    const active = document.fullscreenElement || document.webkitFullscreenElement;
-    syncFullscreenButton();
-    if (active) return;
-    if (fullscreenExitFromUs || fsExitKeepOverlay) return;
-    if (!playOverlayOpen) return;
-    // Leave fullscreen straight to the feed. history.back() alone is often
-    // ignored inside this event, which left the in-page iframe on screen.
-    const dropPlay = history.state && history.state.opus === 'play';
-    closePlayOverlay({ immediate: true });
-    if (dropPlay) history.back();
-  };
-  document.addEventListener('fullscreenchange', onFullscreenEnd);
-  document.addEventListener('webkitfullscreenchange', onFullscreenEnd);
 }
 
 function cards() {
@@ -1175,7 +1031,7 @@ function onVideoEnded(video) {
   const idx = Number(card?.dataset.index);
   if (idx !== activeIndex) return;
   if (document.visibilityState === 'hidden') return;
-  if (commentsOpen || playOverlayOpen || autoAdvancePaused) return;
+  if (commentsOpen || autoAdvancePaused) return;
   if (video.paused && !video.ended) return;
 
   const dur = Number(video.duration);
@@ -1205,7 +1061,7 @@ function onVideoEnded(video) {
 
 function advanceToNext() {
   if (document.visibilityState === 'hidden') return;
-  if (commentsOpen || playOverlayOpen || autoAdvancePaused) return;
+  if (commentsOpen || autoAdvancePaused) return;
   const list = cards();
   const next = activeIndex + 1;
   if (next >= list.length) {
@@ -1329,7 +1185,6 @@ function showSlide(card, i) {
 function slidesBlocked() {
   return (
     document.visibilityState === 'hidden' ||
-    playOverlayOpen ||
     slideHold ||
     slidesMediaPaused ||
     slidesEndCardHeld
@@ -1409,7 +1264,6 @@ function onSlidesEnded() {
     idx === activeIndex &&
     document.visibilityState !== 'hidden' &&
     !commentsOpen &&
-    !playOverlayOpen &&
     !autoAdvancePaused &&
     activeIndex + 1 < cards().length;
   if (canAdvance) {
@@ -2036,7 +1890,7 @@ function wireCommentsSheet() {
   grab.addEventListener('pointercancel', onEnd);
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && commentsOpen && !playOverlayOpen) {
+    if (e.key === 'Escape' && commentsOpen) {
       e.preventDefault();
       closeCommentsSheet();
     }
@@ -2482,13 +2336,6 @@ function buildCard(game, index) {
   return card;
 }
 
-function isIframeGame(gameOrFlag) {
-  if (typeof gameOrFlag === 'boolean') return gameOrFlag;
-  // In-feed overlay unless the catalog says embedding is blocked (iframe:false).
-  if (gameOrFlag && typeof gameOrFlag === 'object') return gameOrFlag.iframe === true || gameOrFlag.iframe == null;
-  return gameOrFlag === true || gameOrFlag === 'true';
-}
-
 /** Native download (not playable in the browser). */
 function isDownloadGame(game) {
   return game?.browser_playable === false && !!game?.download_url;
@@ -2537,95 +2384,11 @@ function playOrDownloadHtml(game) {
 }
 
 function playButtonLabel(game) {
-  return isIframeGame(game) ? 'Play ▸' : 'Play ↗';
+  return 'Play ↗';
 }
 
 function openGame(url) {
   window.open(url, '_blank', 'noopener,noreferrer');
-}
-
-let playHintTimers = [];
-
-function hidePlayHint() {
-  playHintTimers.forEach(clearTimeout);
-  playHintTimers = [];
-  const hint = playOverlayEl?.querySelector('[data-play-hint]');
-  if (hint) {
-    hint.hidden = true;
-    hint.classList.remove('show');
-  }
-}
-
-/** Unverified embeds: after ~4s offer a new tab in case the frame is blank; hides after ~8s. */
-function schedulePlayHint(url) {
-  hidePlayHint();
-  const hint = playOverlayEl?.querySelector('[data-play-hint]');
-  if (!hint) return;
-  const link = hint.querySelector('[data-hint-open]');
-  if (link) link.href = url;
-  playHintTimers.push(
-    setTimeout(() => {
-      if (!playOverlayOpen) return;
-      hint.hidden = false;
-      requestAnimationFrame(() => hint.classList.add('show'));
-    }, 4000),
-    setTimeout(hidePlayHint, 12000),
-  );
-}
-
-function openPlayOverlay(url, title = 'Play game', { verifiedEmbed = false } = {}) {
-  if (!playOverlayEl || !playFrameEl || !url) return;
-  playOverlayOpen = true;
-  autoAdvancePaused = true;
-  watchAccumSec = 0;
-  pauseActiveMedia();
-
-  playFrameEl.title = title || 'Play game';
-  playFrameEl.src = url;
-  const openLink = playOverlayEl.querySelector('[data-open-play]');
-  if (openLink) openLink.href = url;
-
-  playOverlayEl.hidden = false;
-  playOverlayEl.setAttribute('aria-hidden', 'false');
-  document.body.classList.add('play-overlay-open');
-  requestAnimationFrame(() => {
-    playOverlayEl.classList.add('open');
-  });
-  // Same tap as Play: browser fullscreen hides Chrome's bars. Back exits it.
-  requestGameFullscreen();
-  syncFullscreenButton();
-  if (!verifiedEmbed) schedulePlayHint(url);
-  pushOverlayHistory('play');
-}
-
-function closePlayOverlay({ immediate = false } = {}) {
-  if (!playOverlayEl || !playOverlayOpen) return;
-  playOverlayOpen = false;
-  analytics.playExited();
-  hidePlayHint();
-  setPseudoFullscreen(false);
-  exitGameFullscreen();
-  playOverlayEl.classList.remove('open');
-  document.body.classList.remove('play-overlay-open');
-  playOverlayEl.setAttribute('aria-hidden', 'true');
-  // Stop game scripts/audio immediately.
-  if (playFrameEl) {
-    playFrameEl.src = 'about:blank';
-    playFrameEl.removeAttribute('srcdoc');
-  }
-  const openLink = playOverlayEl.querySelector('[data-open-play]');
-  if (openLink) openLink.href = '#';
-
-  const finish = () => {
-    if (playOverlayOpen) return;
-    playOverlayEl.hidden = true;
-    // Resume feed video + auto-advance after Exit.
-    autoAdvancePaused = false;
-    watchAccumSec = 0;
-    resumeActiveMedia();
-  };
-  if (immediate) finish();
-  else setTimeout(finish, 180);
 }
 
 /**
@@ -2673,7 +2436,7 @@ function wireActiveVideoTap(card, game) {
 
   const fireLongPress = () => {
     if (longPressFired || !holdAlive) return;
-    if (commentsOpen || playOverlayOpen) return;
+    if (commentsOpen) return;
     if (!cardIsCurrent()) return;
     // Real scroll-away during the hold (not snap settle).
     if (Math.abs(feedEl.scrollTop - startScroll) > 48) return;
@@ -2762,7 +2525,7 @@ function wireActiveVideoTap(card, game) {
     }
     if (!tapArmed) return;
     tapArmed = false;
-    if (commentsOpen || playOverlayOpen) return;
+    if (commentsOpen) return;
     if (!cardIsCurrent()) return;
     if (Math.abs(feedEl.scrollTop - startScroll) > 8) return;
     if (Math.abs(e.clientX - startX) > 14 || Math.abs(e.clientY - startY) > 14) return;
@@ -2771,29 +2534,19 @@ function wireActiveVideoTap(card, game) {
   });
 }
 
-function playGame(gameOrUrl, maybeTitle) {
+function playGame(gameOrUrl) {
   const url =
     typeof gameOrUrl === 'string'
       ? gameOrUrl
       : gameOrUrl?.play_url || gameOrUrl?.dataset?.url;
   if (!url) return;
-  const iframe =
-    typeof gameOrUrl === 'string'
-      ? false
-      : isIframeGame(gameOrUrl);
-  const title =
-    maybeTitle ||
-    (typeof gameOrUrl === 'object' && gameOrUrl?.title) ||
-    'Play game';
   const gid = typeof gameOrUrl === 'object' ? gameOrUrl?.id || gameOrUrl?.dataset?.id : currentGameId();
-  analytics.playStarted(gid, iframe);
-  if (iframe) openPlayOverlay(url, title, { verifiedEmbed: gameOrUrl?.iframe === true });
-  else {
-    autoAdvancePaused = true;
-    watchAccumSec = 0;
-    pauseActiveMedia();
-    openGame(url);
-  }
+  // Every game opens in a new tab (the in-feed iframe overlay is retired).
+  analytics.playStarted(gid, false);
+  autoAdvancePaused = true;
+  watchAccumSec = 0;
+  pauseActiveMedia();
+  openGame(url);
 }
 
 function wireDownloadButton(btn, game) {
@@ -2812,7 +2565,7 @@ function wireDownloadButton(btn, game) {
   });
 }
 
-/** Tap Play = normal (iframe overlay or new tab). Hold ~450ms = always new tab. */
+/** Tap Play or hold ~450ms: opens the game in a new tab. */
 function wirePlayButton(btn, game) {
   if (!btn) return;
   let holdTimer = 0;
@@ -2866,127 +2619,6 @@ function wirePlayButton(btn, game) {
   });
 }
 
-function pointInEl(x, y, el) {
-  if (!el) return false;
-  const r = el.getBoundingClientRect();
-  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-}
-
-function wirePlayOverlay() {
-  if (!playOverlayEl) return;
-
-  // Cross-origin OOPIF games (e.g. halo.omgithub.com with COOP/COEP) can
-  // retarget the synthesized `click` to <html> even when pointerdown/up hit
-  // the Exit/Open controls. :active still animates, but click handlers never
-  // run. Prefer pointerup on the controls; fall back to click + hit-tested
-  // document click for keyboard / odd mouse paths.
-  let openGuardUntil = 0;
-
-  const activateClose = (e) => {
-    if (!playOverlayOpen) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dismissPlayOverlay();
-  };
-
-  const activateOpen = (e) => {
-    if (!playOverlayOpen) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const openLink = playOverlayEl.querySelector('[data-open-play]');
-    const href = openLink?.getAttribute('href');
-    if (!href || href === '#') return;
-    const now = Date.now();
-    if (now < openGuardUntil) return;
-    openGuardUntil = now + 600;
-    window.open(href, '_blank', 'noopener,noreferrer');
-  };
-
-  const bindActivate = (el, activate) => {
-    if (!el) return;
-    el.addEventListener('pointerup', (e) => {
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
-      activate(e);
-    });
-    el.addEventListener('click', activate);
-  };
-
-  let fsGuardUntil = 0;
-  const activateFs = (e) => {
-    if (!playOverlayOpen) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const now = Date.now();
-    if (now < fsGuardUntil) return; // pointerup + click fire for one tap
-    fsGuardUntil = now + 600;
-    toggleOverlayFullscreen();
-  };
-  const activateHandle = (e) => {
-    if (!playOverlayOpen) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setPseudoFullscreen(false);
-  };
-  let hintGuardUntil = 0;
-  const activateHintOpen = (e) => {
-    if (!playOverlayOpen) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const href = playOverlayEl.querySelector('[data-hint-open]')?.getAttribute('href');
-    const now = Date.now();
-    if (!href || href === '#' || now < hintGuardUntil) return;
-    hintGuardUntil = now + 600;
-    hidePlayHint();
-    window.open(href, '_blank', 'noopener,noreferrer');
-  };
-  const activateHintClose = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    hidePlayHint();
-  };
-
-  playOverlayEl.querySelectorAll('[data-close-play]').forEach((el) => {
-    bindActivate(el, activateClose);
-  });
-  bindActivate(playOverlayEl.querySelector('[data-open-play]'), activateOpen);
-  const fsBtn = playOverlayEl.querySelector('[data-fs-play]');
-  const handleBtn = playOverlayEl.querySelector('[data-fs-handle]');
-  const hintOpen = playOverlayEl.querySelector('[data-hint-open]');
-  const hintClose = playOverlayEl.querySelector('[data-hint-close]');
-  bindActivate(fsBtn, activateFs);
-  bindActivate(handleBtn, activateHandle);
-  bindActivate(hintOpen, activateHintOpen);
-  bindActivate(hintClose, activateHintClose);
-
-  // When click is retargeted to <html>, still honor taps that land on controls.
-  document.addEventListener(
-    'click',
-    (e) => {
-      if (!playOverlayOpen) return;
-      const x = e.clientX;
-      const y = e.clientY;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-      const exitBtn = playOverlayEl.querySelector('[data-close-play]');
-      const openLink = playOverlayEl.querySelector('[data-open-play]');
-      const visible = (el) => el && !el.hidden && el.offsetParent !== null;
-      if (pointInEl(x, y, exitBtn)) activateClose(e);
-      else if (pointInEl(x, y, openLink)) activateOpen(e);
-      else if (visible(fsBtn) && pointInEl(x, y, fsBtn)) activateFs(e);
-      else if (visible(handleBtn) && pointInEl(x, y, handleBtn)) activateHandle(e);
-      else if (visible(hintClose) && pointInEl(x, y, hintClose)) activateHintClose(e);
-      else if (visible(hintOpen) && pointInEl(x, y, hintOpen)) activateHintOpen(e);
-    },
-    true,
-  );
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && playOverlayOpen) {
-      e.preventDefault();
-      dismissPlayOverlay();
-    }
-  });
-}
-
 function scrollToIndex(i, { smooth = true } = {}) {
   const list = cards();
   if (!list.length) return;
@@ -3026,7 +2658,7 @@ function wireKeyboard() {
   if (keyboardWired) return;
   keyboardWired = true;
   window.addEventListener('keydown', (e) => {
-    if (commentsOpen || playOverlayOpen) return;
+    if (commentsOpen) return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'j') {
       e.preventDefault();
       const current = currentIndexFromScroll();
@@ -3096,8 +2728,14 @@ function syncMobileUI(on) {
   mobileFilterEl.setAttribute('aria-pressed', on ? 'true' : 'false');
 }
 
-function renderFeed(mode, mobileOnly, { restore = true, landId = '' } = {}) {
-  const sorted = visibleGames(mode, mobileOnly);
+function renderFeed(mode, mobileOnly, { restore = true, landId = '', ensureId = '' } = {}) {
+  let sorted = visibleGames(mode, mobileOnly);
+  // A shared ?g= link must open that game even when the tag / search / mobile
+  // filter would hide it: pin it at the top of the filtered list.
+  if (ensureId && !sorted.some((g) => g.id === ensureId)) {
+    const linked = allGames.find((g) => g.id === ensureId);
+    if (linked) sorted = [linked, ...sorted];
+  }
   let games = sorted;
   const resumeId = restore ? resumeIdForGames(games) : '';
   const anchorId = restore ? resumeId : landId;
@@ -3384,7 +3022,6 @@ async function init() {
 
   wireAudioGesture();
   wireCommentsSheet();
-  wirePlayOverlay();
   wireHistoryNavigation();
 
   const mode = readSortMode();
@@ -3395,7 +3032,14 @@ async function init() {
   wireMobileFilter();
   wireTagFilter();
   wireSearch();
-  renderFeed(mode, mobileOnly, { restore: !activeTag });
+  // ?g= wins on every boot. With ?tag= we skip last-seen resume, but must
+  // still land on the linked game (it used to fall to the tag's first card).
+  const linkedId = deepLinkIdFromUrl();
+  renderFeed(mode, mobileOnly, {
+    restore: !activeTag,
+    landId: activeTag ? linkedId : '',
+    ensureId: linkedId,
+  });
 
   wireKeyboard();
   wireVisibility();
@@ -3461,7 +3105,7 @@ function wireVisibility() {
       else pauseSlides();
     } else {
       // Stay paused while comments or iframe Play overlay is open.
-      if (commentsOpen || playOverlayOpen) return;
+      if (commentsOpen) return;
       // Back from background / external Play: start accum fresh if Play
       // cancelled this card, then resume playback.
       if (autoAdvancePaused) {
