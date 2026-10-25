@@ -207,8 +207,12 @@ export function inferAuthor(g) {
 
   // Prefer catalog avatar when local/public or absolute http; else GitHub png.
   let avatar_url = null;
-  if (g.avatar_url && typeof g.avatar_url === 'string') {
-    const a = g.avatar_url.trim();
+  // Overheard writes either avatar_url or avatar_path (e.g. /avatars/foo.jpg).
+  const avatarRaw = [g.avatar_url, g.avatar_path].find(
+    (v) => typeof v === 'string' && v.trim() && !/^https?:\/\//i.test(v.trim()),
+  ) || g.avatar_url;
+  if (avatarRaw && typeof avatarRaw === 'string') {
+    const a = avatarRaw.trim();
     if (a) {
       if (/^https?:\/\//i.test(a)) avatar_url = a;
       else if (isLocalPublicPath(a)) avatar_url = a.startsWith('/') ? a : `/${a}`;

@@ -3,6 +3,7 @@ import {
   REPO_RAW_BASE,
 } from './feed-from-catalog.js';
 import * as analytics from './analytics.js';
+import { MEDIA_BASE } from './catalog-config.js';
 import { searchGames, queryWords } from './search.js';
 import { siteFor, isKnownHost, gameCanonicalUrl, MAIN_ORIGIN } from './sites.js';
 
@@ -1723,8 +1724,9 @@ function commentRowHtml(comment) {
   const initials = initialsFrom(author);
   const hue = hueFrom(author);
   const avatarUrl = resolveCommentAvatarUrl(comment);
+  const avatarSrc = avatarSources(avatarUrl);
   const avatar = avatarUrl
-    ? `<img class="cmt-avatar-img" src="${escapeHtml(avatarUrl)}" alt="" width="36" height="36" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-fallback="${escapeHtml(initials)}" data-hue="${hue}" />`
+    ? `<img class="cmt-avatar-img" src="${escapeHtml(avatarSrc.src)}"${avatarSrc.alt ? ` data-alt-src="${escapeHtml(avatarSrc.alt)}"` : ''} alt="" width="36" height="36" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-fallback="${escapeHtml(initials)}" data-hue="${hue}" />`
     : `<span class="cmt-avatar-fallback" style="--hue:${hue}" aria-hidden="true">${escapeHtml(initials)}</span>`;
   const url = typeof comment.url === 'string' ? comment.url.trim() : '';
   const safeUrl = url && httpUrl(url) ? url : '';
@@ -1768,7 +1770,7 @@ function renderCommentsList(game) {
   }
   commentsListEl.innerHTML = list.map(commentRowHtml).join('');
   commentsListEl.querySelectorAll('.cmt-avatar-img').forEach((img) => {
-    img.addEventListener('error', () => {
+    wireAvatarFallback(img, () => {
       const fallback = document.createElement('span');
       fallback.className = 'cmt-avatar-fallback';
       fallback.style.setProperty('--hue', img.dataset.hue || '260');
@@ -1932,6 +1934,31 @@ function isLocalAvatarPath(url) {
   }
 }
 
+/**
+ * Catalog avatars (/avatars/<file>) are published to R2 by publish_catalog.sh,
+ * so new ones need no site deploy: load from the R2 media base first and fall
+ * back to the site's own /avatars copy. Returns { src, alt }.
+ */
+function avatarSources(url) {
+  const u = String(url || '').trim();
+  const m = u.match(/^\/?avatars\/([^/?#]+)$/i);
+  if (m) return { src: `${MEDIA_BASE}avatars/${m[1]}`, alt: `/avatars/${m[1]}` };
+  return { src: u, alt: '' };
+}
+
+/** On error: try the alternate (site) copy once, then call giveUp(). */
+function wireAvatarFallback(img, giveUp) {
+  img.addEventListener('error', () => {
+    const alt = img.dataset.altSrc;
+    if (alt && img.getAttribute('src') !== alt) {
+      img.dataset.altSrc = '';
+      img.src = alt;
+      return;
+    }
+    giveUp();
+  });
+}
+
 function resolveAvatarUrl(game) {
   const raw = typeof game?.avatar_url === 'string' ? game.avatar_url.trim() : '';
   if (raw && isLocalAvatarPath(raw)) return raw;
@@ -2067,8 +2094,9 @@ function authorRowHtml(game) {
   const initials = initialsFrom(name);
   const hue = hueFrom(name);
   const avatarUrl = resolveAvatarUrl(game);
+  const avatarSrc = avatarSources(avatarUrl);
   const avatar = avatarUrl
-    ? `<img class="avatar-img" data-src="${escapeHtml(avatarUrl)}" alt="" width="36" height="36" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-fallback="${escapeHtml(initials)}" data-hue="${hue}" />`
+    ? `<img class="avatar-img" data-src="${escapeHtml(avatarSrc.src)}"${avatarSrc.alt ? ` data-alt-src="${escapeHtml(avatarSrc.alt)}"` : ''} alt="" width="36" height="36" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-fallback="${escapeHtml(initials)}" data-hue="${hue}" />`
     : `<span class="avatar-fallback" style="--hue:${hue}" aria-hidden="true">${escapeHtml(initials)}</span>`;
   const authorUrl = authorUrlFor(game);
   const tag = authorUrl ? 'a' : 'div';
@@ -2340,7 +2368,7 @@ function buildCard(game, index) {
 
   const img = card.querySelector('.avatar-img');
   if (img) {
-    img.addEventListener('error', () => {
+    wireAvatarFallback(img, () => {
       const fallback = document.createElement('span');
       fallback.className = 'avatar-fallback';
       fallback.style.setProperty('--hue', img.dataset.hue || '260');
