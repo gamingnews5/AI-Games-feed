@@ -1,18 +1,10 @@
 /**
  * Map Overheard / Claude-vs-ChatGPT catalog JSON → AI Games Feed card entries.
- * Used at runtime in the browser (catalog JSON on GitHub raw; videos on R2).
+ * Used at runtime in the browser (catalog via same-origin /catalog.json, which the
+ * Pages worker serves from R2; media on the R2 public bucket).
  */
 
-import { UPSTREAM_CATALOG_URL, CATALOG_SNAPSHOT_PATH, MEDIA_BASE } from './catalog-config.js';
-
-/** Catalog sources (configured in src/catalog-config.js). */
-export const CATALOG_SOURCE = {
-  name: UPSTREAM_CATALOG_URL ? 'upstream' : 'snapshot',
-  catalog: UPSTREAM_CATALOG_URL,
-  snapshot: CATALOG_SNAPSHOT_PATH,
-};
-
-export const CATALOG_URL = UPSTREAM_CATALOG_URL;
+import { MEDIA_BASE } from './catalog-config.js';
 
 /** Screenshots / non-video media (R2 mirror of the catalog repo paths). */
 export const REPO_RAW_BASE = MEDIA_BASE;
@@ -439,48 +431,13 @@ export function mapCatalogToFeed(data) {
   };
 }
 
-/**
- * Fetch the aigamedevs catalog directly, then retry the same catalog through
- * the Vite dev proxy if direct CORS access fails.
- * Uses cache: 'no-cache' so hourly Overheard pushes show up promptly.
- */
-/** Same-origin edge-cached catalog copy served by the Pages worker. */
+/** Same-origin edge-cached catalog served by the Pages worker (from R2). */
 export const SAME_ORIGIN_CATALOG = '/catalog.json';
 
-function sameOriginCatalogAvailable() {
-  try {
-    const h = location.hostname;
-    return !(h === 'localhost' || h === '0.0.0.0' || /^127\./.test(h) || /^\[?::1\]?$/.test(h));
-  } catch (_) {
-    return false;
-  }
-}
-
 export async function fetchCatalogFeed() {
-  const errors = [];
-  const tryFetch = async (url, via, opts) => {
-    try {
-      const res = await fetch(url, opts);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return { feed: mapCatalogToFeed(data), via };
-    } catch (err) {
-      errors.push(`${url}: ${err?.message || err}`);
-      return null;
-    }
-  };
-  // Production: the worker's /catalog.json (upstream edge-cached ~5 min, or the
-  // bundled snapshot when no upstream is set / upstream fails).
-  if (sameOriginCatalogAvailable()) {
-    const r = await tryFetch(SAME_ORIGIN_CATALOG, 'edge:catalog.json', { credentials: 'same-origin' });
-    if (r) return r;
-  }
-  if (CATALOG_SOURCE.catalog) {
-    const r = await tryFetch(CATALOG_SOURCE.catalog, 'raw:upstream', { cache: 'no-cache', mode: 'cors' });
-    if (r) return r;
-  }
-  const r = await tryFetch(CATALOG_SOURCE.snapshot, 'snapshot', { credentials: 'same-origin' });
-  if (r) return r;
-
-  throw new Error(`Catalog fetch failed (${errors.join('; ')})`);
+  // Production: the Pages worker; `vite dev` proxies /catalog.json to R2.
+  const res = await fetch(SAME_ORIGIN_CATALOG, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`Catalog fetch failed (${SAME_ORIGIN_CATALOG}: HTTP ${res.status})`);
+  const data = await res.json();
+  return { feed: mapCatalogToFeed(data), via: 'edge:catalog.json' };
 }

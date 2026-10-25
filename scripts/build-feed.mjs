@@ -2,11 +2,12 @@
 /**
  * OFFLINE DEMO BUILDER — not the feed source of truth.
  *
- * Architecture A (default): the browser fetches the aigamedevs catalog
- * and maps cards in src/feed-from-catalog.js.
+ * Default: the browser fetches same-origin /catalog.json (Pages worker → R2,
+ * published from gamingnews5/Claude-vs-ChatGPT) and maps cards in
+ * src/feed-from-catalog.js.
  *
  * This script still rebuilds public/games.json from a local catalog +
- * public/videos/ for air-gapped / offline demos. Prefer the raw fetch path.
+ * public/videos/ for air-gapped / offline demos. Prefer the live R2 path.
  *
  * Usage: node scripts/build-feed.mjs
  */

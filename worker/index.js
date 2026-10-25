@@ -7,57 +7,61 @@
  */
 import { MAIN_ORIGIN, DEFAULT_HOST, SITES, siteFor, isKnownHost, normalizeHost, gameCanonicalUrl } from '../src/sites.js';
 import { gameMedia } from '../src/feed-from-catalog.js';
-import { UPSTREAM_CATALOG_URL, CATALOG_SNAPSHOT_PATH } from '../src/catalog-config.js';
+import { CATALOG_R2_KEY, CATALOG_PUBLIC_URL } from '../src/catalog-config.js';
 const HTML_NO_CACHE = 'no-cache, must-revalidate';
 /** Edge copy of the catalog (Cache API key + TTL). */
-const CATALOG_CACHE_KEY =
-  'https://catalog-cache.invalid/grokgames-v2.json?u=' + encodeURIComponent(UPSTREAM_CATALOG_URL || 'snapshot');
+const CATALOG_CACHE_KEY = 'https://catalog-cache.invalid/grokgames-r2-v3.json';
 const CATALOG_TTL_S = 300;
 /** Max time the HTML may wait for a preload lookup before going out plain. */
 const PRELOAD_LOOKUP_BUDGET_MS = 120;
 
-/** Bundled catalog snapshot from the Pages assets. */
-async function snapshotCatalog(env, request) {
-  if (!env?.ASSETS) return null;
-  const res = await env.ASSETS.fetch(new Request(new URL(CATALOG_SNAPSHOT_PATH, request.url)));
-  return res.ok ? res : null;
+/** Read the catalog from R2: bucket binding first, then the public r2.dev URL. */
+async function fetchCatalogFromR2(env) {
+  if (env?.CATALOG_BUCKET) {
+    try {
+      const obj = await env.CATALOG_BUCKET.get(CATALOG_R2_KEY);
+      if (obj) return { body: await obj.arrayBuffer(), source: 'r2-binding' };
+    } catch (_) {}
+  }
+  const res = await fetch(CATALOG_PUBLIC_URL, { cf: { cacheTtl: 60, cacheEverything: true } });
+  if (res.ok) return { body: await res.arrayBuffer(), source: 'r2-public' };
+  return null;
 }
 
 /**
- * Catalog response: upstream (edge cache, refreshed at most every
- * CATALOG_TTL_S per colo) when UPSTREAM_CATALOG_URL is set, else / on failure
- * the bundled snapshot. Never parses the JSON here.
+ * Catalog response from R2, edge-cached (refreshed at most every CATALOG_TTL_S
+ * per colo). Never parses the JSON here.
  */
-async function cachedCatalog(ctx, env, request) {
-  if (UPSTREAM_CATALOG_URL) {
-    try {
-      const cache = caches.default;
-      const key = new Request(CATALOG_CACHE_KEY);
-      const hit = await cache.match(key);
-      if (hit) return hit;
-      const res = await fetch(UPSTREAM_CATALOG_URL, { cf: { cacheTtl: CATALOG_TTL_S, cacheEverything: true } });
-      if (res.ok) {
-        const body = await res.arrayBuffer();
-        const stored = new Response(body, {
-          headers: {
-            'content-type': 'application/json; charset=utf-8',
-            'cache-control': `public, max-age=${CATALOG_TTL_S}`,
-            'x-catalog-source': 'upstream',
-          },
-        });
-        const put = cache.put(key, stored.clone()).catch(() => {});
-        if (ctx?.waitUntil) ctx.waitUntil(put);
-        return stored;
-      }
-    } catch (_) {}
+async function cachedCatalog(ctx, env) {
+  const cache = caches.default;
+  const key = new Request(CATALOG_CACHE_KEY);
+  try {
+    const hit = await cache.match(key);
+    if (hit) return hit;
+  } catch (_) {}
+  try {
+    const got = await fetchCatalogFromR2(env);
+    if (!got) return null;
+    const stored = new Response(got.body, {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': `public, max-age=${CATALOG_TTL_S}`,
+        'x-catalog-source': got.source,
+        'x-catalog-fetched-at': new Date().toISOString(),
+      },
+    });
+    const put = cache.put(key, stored.clone()).catch(() => {});
+    if (ctx?.waitUntil) ctx.waitUntil(put);
+    return stored;
+  } catch (_) {
+    return null;
   }
-  return snapshotCatalog(env, request);
 }
 
 async function catalogJsonResponse(ctx, env, request) {
   let res = null;
   try {
-    res = await cachedCatalog(ctx, env, request);
+    res = await cachedCatalog(ctx, env);
   } catch (_) {}
   if (!res) {
     return new Response('{"error":"catalog unavailable"}', {
@@ -70,7 +74,7 @@ async function catalogJsonResponse(ctx, env, request) {
       'content-type': 'application/json; charset=utf-8',
       // Browser revalidates every load; the edge copy is at most ~5 min old.
       'cache-control': 'no-cache',
-      'x-catalog-source': res.headers.get('x-catalog-source') || 'snapshot',
+      'x-catalog-source': res.headers.get('x-catalog-source') || 'r2',
     },
   });
 }
@@ -120,7 +124,7 @@ function findGameInText(text, id) {
 }
 
 async function posterForGame(id, ctx, env, request) {
-  const res = await cachedCatalog(ctx, env, request);
+  const res = await cachedCatalog(ctx, env);
   if (!res) return null;
   const g = findGameInText(await res.text(), id);
   if (!g || !g.play_url) return null;
@@ -176,7 +180,7 @@ function robotsTxt(site, preview) {
 
 async function catalogIds(ctx, env, request) {
   try {
-    const res = await cachedCatalog(ctx, env, request);
+    const res = await cachedCatalog(ctx, env);
     if (!res) return [];
     const doc = await res.json();
     const games = Array.isArray(doc) ? doc : doc.games || [];

@@ -2,9 +2,9 @@
 
 TikTok-style vertical feed of **AI-made browser games** — Claude, ChatGPT/Astra, and more. Swipe through gameplay clips; open play links and sources from the card rail.
 
-Live site: **[games.omgithub.com](https://games.omgithub.com/)**. The former **lolgames.net** URL 301-redirects here.
+Live site: **[games.omgithub.com](https://games.omgithub.com/)**. **lolgames.net** serves the same build branded "LOL Games" (per-host config in `src/sites.js`).
 
-Live catalog source of truth: **[aigamedevs/Claude-vs-ChatGPT](https://github.com/aigamedevs/Claude-vs-ChatGPT)** (`data/grokgames.json`). This app does **not** ship the catalog; it fetches raw GitHub at runtime.
+Catalog source of truth: **[gamingnews5/Claude-vs-ChatGPT](https://github.com/gamingnews5/Claude-vs-ChatGPT)** (`data/grokgames.json`). At runtime the site reads it from **Cloudflare R2**, never from GitHub; this app does not ship the catalog.
 
 ## Preview
 
@@ -30,35 +30,44 @@ Phone-friendly **Top | New** toggle in the top bar:
 Videos start muted on every page load (Instagram/TikTok-style). Unmuting lasts
 only for the current session and resets on refresh.
 
-## Catalog source (Architecture A)
+## Catalog source (R2)
 
-Runtime feed loads games from GitHub raw — **no `npm run build:feed` copy step**.
+The site never fetches from GitHub at runtime. Flow:
 
-**Catalog:**
+1. Overheard (or any bot) commits `data/grokgames.json` (and media) to
+   [gamingnews5/Claude-vs-ChatGPT](https://github.com/gamingnews5/Claude-vs-ChatGPT).
+2. It then publishes to R2 (bucket `ai-games-videos`):
+
+   ```bash
+   /workspace/catalog-publish/publish_catalog.sh /workspace/Claude-vs-ChatGPT/data/grokgames.json
+   ```
+
+   The script validates the JSON (games array, minimum count, unique ids), uploads
+   any repo-relative screenshots/clips/posters the catalog references that are not
+   on R2 yet (same key as the repo path), then uploads the catalog to
+   `catalog/grokgames.json` (`application/json`, `max-age=60`). `DRY_RUN=1` only checks.
+3. The browser fetches same-origin **`/catalog.json`**. The Pages worker
+   (`worker/index.js`) reads `catalog/grokgames.json` through the R2 bucket binding
+   `CATALOG_BUCKET` (falls back to the public r2.dev URL) and edge-caches it for
+   5 minutes, so a publish shows up within ~5–6 minutes.
+
+Relative media (`video_path`, `videos[].path`, posters, screenshots) resolve to the
+R2 public bucket under the same keys:
 
 ```
-https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main/data/grokgames.json
+https://pub-f8a67dd028134c809667b629ac5ff178.r2.dev/videos/<file>.mp4
+https://pub-f8a67dd028134c809667b629ac5ff178.r2.dev/screenshots/<file>.jpg
 ```
 
-Relative media (`video_path`, `videos[].path`, screenshots) resolve to:
-
-```
-https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main/videos/<file>.mp4
-https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main/screenshots/<file>.jpg
-```
-
-Client mapping lives in `src/feed-from-catalog.js` (platforms, authors, likes,
-comments, timestamps, `made_with` badges). Fetch uses `cache: 'no-cache'` so
-hourly Overheard pushes show within ~minutes (GitHub raw CDN is ~`max-age=300`).
-
-CORS: `raw.githubusercontent.com` returns `Access-Control-Allow-Origin: *`.
-If the direct JSON fetch ever fails CORS, Vite dev retries the same
-aigamedevs catalog through `/catalog-proxy/...` (see `vite.config.js`).
+All sources live in **`src/catalog-config.js`** (`CATALOG_R2_KEY`, `MEDIA_BASE`,
+`CATALOG_PUBLIC_URL`). Client mapping lives in `src/feed-from-catalog.js`
+(platforms, authors, likes, comments, timestamps, `made_with` badges). In
+`vite dev`, `/catalog.json` is proxied to the R2 public URL.
 
 `public/games.json` is **not** the source of truth. Optional offline rebuild:
 `npm run build:feed` / `npm run build:feed:offline` (air-gapped demos only).
 Large twin video dirs (`public/videos/`, `public/videos-orig/`) are gitignored;
-play clips from the catalog repo instead.
+clips play from R2.
 
 ## Production build
 
@@ -109,8 +118,8 @@ live in Cloudflare and are unchanged.
 
 | Repo | Role |
 |------|------|
-| [aigamedevs/Claude-vs-ChatGPT](https://github.com/aigamedevs/Claude-vs-ChatGPT) | Catalog + videos/screenshots (SoT) |
-| [grootbot-dev/AI-Games-feed](https://github.com/grootbot-dev/AI-Games-feed) | This feed UI (moved from SubmitGame/AI-Games-feed) |
+| [gamingnews5/Claude-vs-ChatGPT](https://github.com/gamingnews5/Claude-vs-ChatGPT) | Catalog + videos/screenshots (SoT; published to R2) |
+| [gamingnews5/AI-Games-feed](https://github.com/gamingnews5/AI-Games-feed) | This feed UI (Cloudflare Pages project `games-omgithub-feed`) |
 
 ## License / contributions
 

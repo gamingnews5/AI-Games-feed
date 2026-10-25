@@ -14,7 +14,7 @@ await build({
 const routes = {
   version: 1,
   include: ['/*'],
-  exclude: ['/catalog-snapshot.json', '/assets/*', '/avatars/*', '/screenshots/*', '/videos/*', '/favicon.ico', '/games.json'],
+  exclude: ['/assets/*', '/avatars/*', '/screenshots/*', '/videos/*', '/favicon.ico', '/games.json'],
 };
 fs.writeFileSync(resolve(root, 'dist/_routes.json'), JSON.stringify(routes, null, 2) + '\n');
 console.log('worker:', fs.statSync(resolve(root, 'dist/_worker.js')).size, 'bytes; routes exclude', routes.exclude.length);
