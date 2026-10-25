@@ -7,46 +7,59 @@
  */
 import { MAIN_ORIGIN, DEFAULT_HOST, SITES, siteFor, isKnownHost, normalizeHost, gameCanonicalUrl } from '../src/sites.js';
 import { gameMedia } from '../src/feed-from-catalog.js';
-
-const CATALOG_URL =
-  'https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main/data/grokgames.json';
+import { UPSTREAM_CATALOG_URL, CATALOG_SNAPSHOT_PATH } from '../src/catalog-config.js';
 const HTML_NO_CACHE = 'no-cache, must-revalidate';
 /** Edge copy of the catalog (Cache API key + TTL). */
-const CATALOG_CACHE_KEY = 'https://catalog-cache.invalid/grokgames-v1.json';
+const CATALOG_CACHE_KEY =
+  'https://catalog-cache.invalid/grokgames-v2.json?u=' + encodeURIComponent(UPSTREAM_CATALOG_URL || 'snapshot');
 const CATALOG_TTL_S = 300;
 /** Max time the HTML may wait for a preload lookup before going out plain. */
 const PRELOAD_LOOKUP_BUDGET_MS = 120;
 
-/**
- * Catalog response from the edge cache, refreshed from raw GitHub at most
- * every CATALOG_TTL_S per colo. Never parses the JSON here.
- */
-async function cachedCatalog(ctx) {
-  const cache = caches.default;
-  const key = new Request(CATALOG_CACHE_KEY);
-  const hit = await cache.match(key);
-  if (hit) return hit;
-  const res = await fetch(CATALOG_URL, { cf: { cacheTtl: CATALOG_TTL_S, cacheEverything: true } });
-  if (!res.ok) return null;
-  const body = await res.arrayBuffer();
-  const stored = new Response(body, {
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': `public, max-age=${CATALOG_TTL_S}`,
-    },
-  });
-  const put = cache.put(key, stored.clone()).catch(() => {});
-  if (ctx?.waitUntil) ctx.waitUntil(put);
-  return stored;
+/** Bundled catalog snapshot from the Pages assets. */
+async function snapshotCatalog(env, request) {
+  if (!env?.ASSETS) return null;
+  const res = await env.ASSETS.fetch(new Request(new URL(CATALOG_SNAPSHOT_PATH, request.url)));
+  return res.ok ? res : null;
 }
 
-async function catalogJsonResponse(ctx) {
+/**
+ * Catalog response: upstream (edge cache, refreshed at most every
+ * CATALOG_TTL_S per colo) when UPSTREAM_CATALOG_URL is set, else / on failure
+ * the bundled snapshot. Never parses the JSON here.
+ */
+async function cachedCatalog(ctx, env, request) {
+  if (UPSTREAM_CATALOG_URL) {
+    try {
+      const cache = caches.default;
+      const key = new Request(CATALOG_CACHE_KEY);
+      const hit = await cache.match(key);
+      if (hit) return hit;
+      const res = await fetch(UPSTREAM_CATALOG_URL, { cf: { cacheTtl: CATALOG_TTL_S, cacheEverything: true } });
+      if (res.ok) {
+        const body = await res.arrayBuffer();
+        const stored = new Response(body, {
+          headers: {
+            'content-type': 'application/json; charset=utf-8',
+            'cache-control': `public, max-age=${CATALOG_TTL_S}`,
+            'x-catalog-source': 'upstream',
+          },
+        });
+        const put = cache.put(key, stored.clone()).catch(() => {});
+        if (ctx?.waitUntil) ctx.waitUntil(put);
+        return stored;
+      }
+    } catch (_) {}
+  }
+  return snapshotCatalog(env, request);
+}
+
+async function catalogJsonResponse(ctx, env, request) {
   let res = null;
   try {
-    res = await cachedCatalog(ctx);
+    res = await cachedCatalog(ctx, env, request);
   } catch (_) {}
   if (!res) {
-    // Edge cache/raw failed: let the client fall back to raw GitHub itself.
     return new Response('{"error":"catalog unavailable"}', {
       status: 502,
       headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
@@ -57,7 +70,7 @@ async function catalogJsonResponse(ctx) {
       'content-type': 'application/json; charset=utf-8',
       // Browser revalidates every load; the edge copy is at most ~5 min old.
       'cache-control': 'no-cache',
-      'x-catalog-cache': 'edge',
+      'x-catalog-source': res.headers.get('x-catalog-source') || 'snapshot',
     },
   });
 }
@@ -106,8 +119,8 @@ function findGameInText(text, id) {
   return null;
 }
 
-async function posterForGame(id, ctx) {
-  const res = await cachedCatalog(ctx);
+async function posterForGame(id, ctx, env, request) {
+  const res = await cachedCatalog(ctx, env, request);
   if (!res) return null;
   const g = findGameInText(await res.text(), id);
   if (!g || !g.play_url) return null;
@@ -161,10 +174,10 @@ function robotsTxt(site, preview) {
   return `User-agent: *\nAllow: /\nDisallow: /stats/\n\nSitemap: ${site.origin}/sitemap.xml\n`;
 }
 
-async function catalogIds() {
+async function catalogIds(ctx, env, request) {
   try {
-    const res = await fetch(CATALOG_URL, { cf: { cacheTtl: 3600, cacheEverything: true } });
-    if (!res.ok) return [];
+    const res = await cachedCatalog(ctx, env, request);
+    if (!res) return [];
     const doc = await res.json();
     const games = Array.isArray(doc) ? doc : doc.games || [];
     const ids = [];
@@ -182,10 +195,10 @@ async function catalogIds() {
   }
 }
 
-async function sitemapXml(site) {
+async function sitemapXml(site, ctx, env, request) {
   const urls = [`${site.origin}/`];
   if (site.origin === MAIN_ORIGIN) {
-    for (const id of await catalogIds()) urls.push(gameCanonicalUrl(id));
+    for (const id of await catalogIds(ctx, env, request)) urls.push(gameCanonicalUrl(id));
   }
   const body = urls.map((u) => `  <url><loc>${esc(u)}</loc></url>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>\n`;
@@ -255,7 +268,7 @@ function rewriteHtml(res, url, site, poster) {
   }
   // Early-fetch hints: catalog (same-origin), media origins, and the deep-linked poster.
   if (!isStats) {
-    // R2 + raw GitHub preconnects are static in index.html.
+    // R2 preconnect is static in index.html.
     let hints = `<link rel="preload" href="/catalog.json" as="fetch" crossorigin="anonymous" fetchpriority="high" />`;
     if (poster) hints += `<link rel="preload" href="${esc(poster)}" as="image" fetchpriority="high" />`;
     rw = rw.on('head', {
@@ -279,8 +292,8 @@ export default {
     const path = url.pathname;
 
     if (path === '/robots.txt') return textResponse(robotsTxt(site, preview), 'text/plain; charset=utf-8');
-    if (path === '/catalog.json') return catalogJsonResponse(ctx);
-    if (path === '/sitemap.xml') return textResponse(await sitemapXml(site), 'application/xml; charset=utf-8');
+    if (path === '/catalog.json') return catalogJsonResponse(ctx, env, request);
+    if (path === '/sitemap.xml') return textResponse(await sitemapXml(site, ctx, env, request), 'application/xml; charset=utf-8');
     if (path === '/stats') {
       const to = new URL(url);
       to.pathname = '/stats/';
@@ -290,7 +303,7 @@ export default {
     const id = path.startsWith('/stats') ? '' : gameIdFrom(url);
     let posterP = Promise.resolve(null);
     if (id) {
-      const lookup = posterForGame(id, ctx);
+      const lookup = posterForGame(id, ctx, env, request);
       // Let a slow cold lookup finish (and fill the edge cache) after the HTML is sent.
       if (ctx?.waitUntil) ctx.waitUntil(lookup.catch(() => {}));
       posterP = withinBudget(lookup, PRELOAD_LOOKUP_BUDGET_MS);

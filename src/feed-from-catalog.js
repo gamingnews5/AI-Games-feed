@@ -3,26 +3,22 @@
  * Used at runtime in the browser (catalog JSON on GitHub raw; videos on R2).
  */
 
-/** Sole catalog and media source: aigamedevs/Claude-vs-ChatGPT. */
+import { UPSTREAM_CATALOG_URL, CATALOG_SNAPSHOT_PATH, MEDIA_BASE } from './catalog-config.js';
+
+/** Catalog sources (configured in src/catalog-config.js). */
 export const CATALOG_SOURCE = {
-  name: 'aigamedevs/Claude-vs-ChatGPT',
-  catalog:
-    'https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main/data/grokgames.json',
-  rawBase: 'https://raw.githubusercontent.com/aigamedevs/Claude-vs-ChatGPT/main/',
-  proxy: '/catalog-proxy/data/grokgames.json',
+  name: UPSTREAM_CATALOG_URL ? 'upstream' : 'snapshot',
+  catalog: UPSTREAM_CATALOG_URL,
+  snapshot: CATALOG_SNAPSHOT_PATH,
 };
 
-export const CATALOG_URL = CATALOG_SOURCE.catalog;
+export const CATALOG_URL = UPSTREAM_CATALOG_URL;
 
-/** Screenshots / non-video media: aigamedevs catalog on GitHub raw. */
-export let REPO_RAW_BASE = CATALOG_SOURCE.rawBase;
+/** Screenshots / non-video media (R2 mirror of the catalog repo paths). */
+export const REPO_RAW_BASE = MEDIA_BASE;
 
 /** Gameplay videos + posters on Cloudflare R2 (public.dev). */
-export const VIDEO_RAW_BASE =
-  'https://pub-f8a67dd028134c809667b629ac5ff178.r2.dev/';
-
-/** Vite-dev proxy for the same aigamedevs catalog when direct fetch fails. */
-export const CATALOG_PROXY_URL = CATALOG_SOURCE.proxy;
+export const VIDEO_RAW_BASE = MEDIA_BASE;
 
 const MADE_WITH_ALLOWED = new Set(['opus-5.5', 'sonnet-5.5', 'astra', 'gemini-4-argon']);
 
@@ -462,38 +458,29 @@ function sameOriginCatalogAvailable() {
 
 export async function fetchCatalogFeed() {
   const errors = [];
-  // Production: same-origin copy (no extra TLS handshake, edge cached ~5 min,
-  // preloaded from the HTML). Falls back to raw GitHub below.
-  if (sameOriginCatalogAvailable()) {
+  const tryFetch = async (url, via, opts) => {
     try {
-      const res = await fetch(SAME_ORIGIN_CATALOG, { credentials: 'same-origin' });
-      if (!res.ok) throw new Error(`HTTP ${res.status} from ${SAME_ORIGIN_CATALOG}`);
+      const res = await fetch(url, opts);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      REPO_RAW_BASE = CATALOG_SOURCE.rawBase;
-      return { feed: mapCatalogToFeed(data), via: 'edge:catalog.json' };
+      return { feed: mapCatalogToFeed(data), via };
     } catch (err) {
-      errors.push(`${SAME_ORIGIN_CATALOG}: ${err?.message || err}`);
+      errors.push(`${url}: ${err?.message || err}`);
+      return null;
     }
+  };
+  // Production: the worker's /catalog.json (upstream edge-cached ~5 min, or the
+  // bundled snapshot when no upstream is set / upstream fails).
+  if (sameOriginCatalogAvailable()) {
+    const r = await tryFetch(SAME_ORIGIN_CATALOG, 'edge:catalog.json', { credentials: 'same-origin' });
+    if (r) return r;
   }
-  try {
-    const res = await fetch(CATALOG_SOURCE.catalog, { cache: 'no-cache', mode: 'cors' });
-    if (!res.ok) throw new Error(`HTTP ${res.status} from raw ${CATALOG_SOURCE.name}`);
-    const data = await res.json();
-    REPO_RAW_BASE = CATALOG_SOURCE.rawBase;
-    return { feed: mapCatalogToFeed(data), via: `raw:${CATALOG_SOURCE.name}` };
-  } catch (err) {
-    errors.push(`raw ${CATALOG_SOURCE.name}: ${err?.message || err}`);
+  if (CATALOG_SOURCE.catalog) {
+    const r = await tryFetch(CATALOG_SOURCE.catalog, 'raw:upstream', { cache: 'no-cache', mode: 'cors' });
+    if (r) return r;
   }
-
-  try {
-    const res = await fetch(CATALOG_SOURCE.proxy, { cache: 'no-cache' });
-    if (!res.ok) throw new Error(`HTTP ${res.status} from proxy ${CATALOG_SOURCE.name}`);
-    const data = await res.json();
-    REPO_RAW_BASE = CATALOG_SOURCE.rawBase;
-    return { feed: mapCatalogToFeed(data), via: `proxy:${CATALOG_SOURCE.name}` };
-  } catch (err) {
-    errors.push(`proxy ${CATALOG_SOURCE.name}: ${err?.message || err}`);
-  }
+  const r = await tryFetch(CATALOG_SOURCE.snapshot, 'snapshot', { credentials: 'same-origin' });
+  if (r) return r;
 
   throw new Error(`Catalog fetch failed (${errors.join('; ')})`);
 }

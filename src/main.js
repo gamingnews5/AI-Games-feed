@@ -2992,7 +2992,7 @@ async function init() {
       console.info('[ai-games-feed] catalog loaded via Vite /catalog-proxy retry');
     }
   } catch (err) {
-    feedEl.innerHTML = `<div class="empty">Failed to load catalog from GitHub<br/><small>${escapeHtml(err.message)}</small></div>`;
+    feedEl.innerHTML = `<div class="empty">Failed to load catalog<br/><small>${escapeHtml(err.message)}</small></div>`;
     if (countEl) countEl.textContent = 'offline';
     return;
   }

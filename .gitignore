@@ -28,3 +28,8 @@ public/videos/
 public/videos-orig/
 tmp-videos/
 drafts/
+
+# Local deploy scratch
+.wrangler/
+files.json
+manifest.json
