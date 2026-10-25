@@ -303,8 +303,13 @@ function passRemoteLikes(g, entry) {
 }
 
 function passComments(g, entry) {
-  if (!Array.isArray(g.comments)) return;
-  entry.comments = g.comments;
+  if (Array.isArray(g.comments)) entry.comments = g.comments;
+  // Real reply/comment total on the source post (X/Reddit/HN), from the catalog.
+  const n = Number(g.comment_count);
+  if (Number.isFinite(n) && n >= 0) entry.comment_count = Math.floor(n);
+  if (typeof g.likes_source_url === 'string' && /^https?:\/\//.test(g.likes_source_url)) {
+    entry.source_post_url = g.likes_source_url;
+  }
 }
 
 /**

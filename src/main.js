@@ -1690,8 +1690,16 @@ function commentsOf(game) {
   return game.comments.filter((c) => c && typeof c === 'object');
 }
 
+/**
+ * Bubble count: the catalog's real reply/comment total on the source post
+ * (comment_count). The fetched sample can include nested replies, so never
+ * show fewer than the comments we actually have. 0 only when no data.
+ */
 function commentCount(game) {
-  return commentsOf(game).length;
+  const listed = commentsOf(game).length;
+  const n = Number(game?.comment_count);
+  const total = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+  return Math.max(total, listed);
 }
 
 /** Prefer local /avatars path from Overheard; else initials (no remote hotlink). */
@@ -1741,6 +1749,16 @@ function renderCommentsList(game) {
   if (!commentsListEl) return;
   const list = sortedComments(game);
   if (!list.length) {
+    const total = commentCount(game);
+    const src = typeof game?.source_post_url === 'string' && httpUrl(game.source_post_url) ? game.source_post_url : '';
+    if (total > 0) {
+      commentsListEl.innerHTML = `
+      <div class="cmt-empty">
+        <p>${escapeHtml(formatCompact(total))} ${total === 1 ? 'reply' : 'replies'} on the original post</p>
+        ${src ? `<p class="cmt-empty-sub"><a href="${escapeHtml(src)}" target="_blank" rel="noopener noreferrer">Open the post</a></p>` : ''}
+      </div>`;
+      return;
+    }
     commentsListEl.innerHTML = `
       <div class="cmt-empty">
         <p>No comments yet</p>
