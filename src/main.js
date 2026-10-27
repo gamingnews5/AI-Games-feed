@@ -297,7 +297,8 @@ function isLiked(id) {
 function toggleLike(id) {
   const map = readLikes();
   if (map[id]) delete map[id];
-  else map[id] = true;
+  // Store when it was liked (truthy, so old `true` entries keep working) for Liked order.
+  else map[id] = Date.now();
   writeLikes(map);
   return Boolean(map[id]);
 }
@@ -475,6 +476,32 @@ function tagFromUrl() {
 
 let activeTag = tagFromUrl();
 
+/** Liked filter (?liked=1): only games liked on this device. */
+function likedFromUrl() {
+  try {
+    const v = new URLSearchParams(window.location.search).get('liked');
+    return v === '1' || v === 'true';
+  } catch (_) {
+    return false;
+  }
+}
+
+let activeLiked = likedFromUrl();
+
+/**
+ * Liked games, most recently liked first. Entries that have a like timestamp
+ * lead (newest first); legacy `true` entries keep the given Top/New order after them.
+ */
+function likedGamesOrdered(sortedGames) {
+  const likes = readLikes();
+  const ts = (g) => (typeof likes[g.id] === 'number' ? likes[g.id] : 0);
+  return sortedGames
+    .filter((g) => likes[g.id])
+    .map((g, i) => ({ g, i, t: ts(g) }))
+    .sort((a, b) => (b.t - a.t) || (a.i - b.i))
+    .map((x) => x.g);
+}
+
 /** Free-text search (?search=…); empty = off. */
 function searchFromUrl() {
   try {
@@ -559,6 +586,8 @@ function filterGames(games, mobileOnly) {
 
 /** Sort by the current mode, then (when searching) exact matches before fuzzy ones. */
 function visibleGames(mode, mobileOnly) {
+  // Liked view: every liked game, ignoring tag / mobile / search filters.
+  if (activeLiked) return likedGamesOrdered(sortGames(allGames, mode));
   const sorted = sortGames(filterGames(allGames, mobileOnly), mode);
   if (!searchWords(activeSearch).length) return sorted;
   return searchGames(sorted, activeSearch, searchFields).list;
@@ -573,10 +602,12 @@ function deepLinkIdFromUrl() {
   }
 }
 
-function publicUrlFor(id = '') {
+function publicUrlFor(id = '', { liked = false } = {}) {
   const current = new URL(window.location.href);
   const u = new URL(PUBLIC_SITE_ORIGIN);
   u.pathname = current.pathname;
+  // ?liked=1 is per-device, so it goes in history URLs but never in share links.
+  if (liked && activeLiked) u.searchParams.set('liked', '1');
   if (activeTag) u.searchParams.set('tag', activeTag);
   if (activeSearch) u.searchParams.set('search', activeSearch);
   if (id) u.searchParams.set('g', id);
@@ -594,7 +625,7 @@ function shareUrlFor(id) {
  * On known hosts this equals shareUrlFor.
  */
 function historyUrlFor(id = '') {
-  const u = publicUrlFor(id);
+  const u = publicUrlFor(id, { liked: true });
   const here = new URL(window.location.href);
   u.protocol = here.protocol;
   u.host = here.host;
@@ -663,6 +694,11 @@ function onHistoryPop() {
     closeCommentsSheet();
   }
   if (state.opus) return;
+  const urlLiked = likedFromUrl();
+  if (urlLiked !== activeLiked) {
+    applyLikedFilter(urlLiked, { fromHistory: true, landId: state.g || deepLinkIdFromUrl() });
+    return;
+  }
   const urlSearch = searchFromUrl();
   if (urlSearch !== activeSearch) {
     activeSearch = urlSearch;
@@ -2176,6 +2212,18 @@ function buildEndCard() {
   const card = document.createElement('section');
   card.className = 'end-card';
   card.setAttribute('aria-labelledby', 'endCardTitle');
+  if (activeLiked) {
+    card.innerHTML = `
+    <div class="end-card-content">
+      <p class="end-card-eyebrow">Liked ♥</p>
+      <h2 id="endCardTitle">That’s all your liked games</h2>
+      <p class="end-card-copy">Tap ♥ on more games to add them here.</p>
+      <button type="button" class="discover-more liked-exit">Show all games</button>
+    </div>
+  `;
+    card.querySelector('.liked-exit')?.addEventListener('click', () => applyLikedFilter(false));
+    return card;
+  }
   card.innerHTML = `
     <div class="end-card-content">
       <p class="end-card-eyebrow">You’re all caught up</p>
@@ -2266,7 +2314,8 @@ function buildCard(game, index) {
   const likeN = displayLikeCount(game);
   const cmtN = commentCount(game);
   // Always show a compact number so empty feeds aren't confusing (0 is fine).
-  const likeCountHtml = `<span class="like-count">${escapeHtml(formatCompact(likeN))}</span>`;
+  // The count is its own button: tap it to show only liked games (heart still toggles).
+  const likeCountHtml = `<button type="button" class="like-count${activeLiked ? ' active' : ''}" aria-pressed="${activeLiked ? 'true' : 'false'}" aria-label="${activeLiked ? 'Show all games' : 'Show liked games'}" title="${activeLiked ? 'Show all games' : 'Show only games you liked'}">${escapeHtml(formatCompact(likeN))}</button>`;
 
   card.innerHTML = `
     ${screenshot}
@@ -2303,6 +2352,7 @@ function buildCard(game, index) {
       ${playOrDownloadHtml(game)}
     </div>
     <div class="rail" aria-label="Actions">
+      <div class="like-stack ${liked ? 'liked' : ''}">
       <button type="button" class="rail-btn like ${liked ? 'liked' : ''}" aria-pressed="${liked ? 'true' : 'false'}" aria-label="${liked ? 'Unlike' : 'Like'}">
         <span class="rail-icon" aria-hidden="true">
           <svg class="icon-heart" viewBox="0 0 24 24" width="28" height="28">
@@ -2310,8 +2360,9 @@ function buildCard(game, index) {
             <path class="heart-fill" d="M12 21s-6.7-4.35-9.33-8.1C.8 10.35 1.2 6.9 3.9 5.25 6.1 3.9 8.7 4.35 12 7.2c3.3-2.85 5.9-3.3 8.1-1.95 2.7 1.65 3.1 5.1 1.23 7.65C18.7 16.65 12 21 12 21z" fill="currentColor"/>
           </svg>
         </span>
-        ${likeCountHtml}
       </button>
+        ${likeCountHtml}
+      </div>
       <button type="button" class="rail-btn comments" aria-label="Comments">
         <span class="rail-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -2352,15 +2403,28 @@ function buildCard(game, index) {
 
   wireActiveVideoTap(card, game);
 
-  const likeBtn = card.querySelector('.like');
+  const likeBtn = card.querySelector('.rail-btn.like');
+  const likeStack = card.querySelector('.like-stack');
+  const likeCountBtn = card.querySelector('.like-count');
+  likeCountBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
+  likeCountBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!activeLiked) analytics.track('liked_filter', { game_id: game.id });
+    applyLikedFilter(!activeLiked);
+  });
   likeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    // In the Liked view the card stays put after unlike (no re-render / scroll jump);
+    // it drops out the next time the filter is entered.
     const on = toggleLike(game.id);
     if (on) analytics.track('like', { game_id: game.id });
     likeBtn.classList.toggle('liked', on);
+    likeStack?.classList.toggle('liked', on);
     likeBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
     likeBtn.setAttribute('aria-label', on ? 'Unlike' : 'Like');
-    const countSpan = likeBtn.querySelector('.like-count');
+    syncLikeTotal();
+    const countSpan = likeCountBtn;
     if (countSpan) {
       const n = remoteLikesOf(game) + (on ? 1 : 0);
       countSpan.textContent = formatCompact(n);
@@ -2797,17 +2861,12 @@ function renderFeed(mode, mobileOnly, { restore = true, landId = '', ensureId = 
     if (linked) sorted = [linked, ...sorted];
   }
   let games = sorted;
-  const resumeId = restore ? resumeIdForGames(games) : '';
+  const resumeId = restore && !activeLiked ? resumeIdForGames(games) : '';
   const anchorId = restore ? resumeId : landId;
   // Scroll up: already seen, oldest at the top. Scroll down: not yet seen.
-  games = orderSeenHistoryAbove(games, anchorId);
-  const likes = likeCount();
-  const videoCount = allGames.filter((g) => g.video).length;
-  const videoLabel = `${videoCount} ${videoCount === 1 ? 'video' : 'videos'}`;
-  countEl.textContent =
-    likes > 0 ? `${catalogCount} games · ${likes}♥` : `${catalogCount} games`;
-  countEl.title = videoLabel;
-  countEl.dataset.tooltip = videoLabel;
+  // Liked view keeps most-recently-liked order instead.
+  if (!activeLiked) games = orderSeenHistoryAbove(games, anchorId);
+  syncLikeTotal();
 
   tearDownVideos();
   feedEl.innerHTML = '';
@@ -2817,6 +2876,11 @@ function renderFeed(mode, mobileOnly, { restore = true, landId = '', ensureId = 
     if (mode === SORT_NEW && sorted.length) {
       feedEl.innerHTML = '';
       feedEl.appendChild(buildEndCard());
+      return;
+    }
+    if (activeLiked) {
+      feedEl.innerHTML = `<div class="empty liked-empty"><p>No liked games yet — tap ♥ on a game</p><button type="button" class="filter-btn liked-exit">Show all games</button></div>`;
+      feedEl.querySelector('.liked-exit')?.addEventListener('click', () => applyLikedFilter(false));
       return;
     }
     const msg = activeSearch
@@ -2848,6 +2912,8 @@ function renderFeed(mode, mobileOnly, { restore = true, landId = '', ensureId = 
   const targetId = restore ? resumeId : landId;
   const start = targetId
     ? resolveStartIndex(targetId)
+    : activeLiked
+    ? 0
     : games.findIndex((g) => !readSeen()[g.id]);
   const startIndex = start > 0 ? start : 0;
   if (startIndex > 0) {
@@ -2890,6 +2956,63 @@ function syncTagUI() {
   tagFilterEl.setAttribute('aria-label', activeTag ? `Clear tag filter ${activeTag}` : '');
 }
 
+const likedFilterEl = document.getElementById('likedFilter');
+
+function syncLikeTotal() {
+  if (!countEl) return;
+  const likes = likeCount();
+  const videoCount = allGames.filter((g) => g.video).length;
+  const videoLabel = `${videoCount} ${videoCount === 1 ? 'video' : 'videos'}`;
+  countEl.textContent =
+    likes > 0 ? `${catalogCount} games · ${likes}♥` : `${catalogCount} games`;
+  countEl.title = videoLabel;
+  countEl.dataset.tooltip = videoLabel;
+}
+
+function syncLikedUI() {
+  document.body.classList.toggle('liked-view', activeLiked);
+  if (likedFilterEl) likedFilterEl.hidden = !activeLiked;
+}
+
+/**
+ * Enter / leave the Liked view. Like tag filters, a change pushes one history
+ * entry (back returns to the previous feed); history-driven changes don't push.
+ * Entering clears the tag and search filters so the view is just your likes.
+ */
+function applyLikedFilter(on, { fromHistory = false, landId = '' } = {}) {
+  const next = Boolean(on);
+  if (next === activeLiked && !fromHistory) return;
+  const keepId = landId || currentGameId() || readLastId();
+  activeLiked = next;
+  if (next && !fromHistory) {
+    activeTag = '';
+    activeSearch = '';
+    searchEntryPushed = false;
+    document.body.classList.remove('search-open');
+  } else if (fromHistory) {
+    activeTag = tagFromUrl();
+    activeSearch = searchFromUrl();
+  }
+  syncLikedUI();
+  syncTagUI();
+  syncSearchUI();
+  // Entering: stay on the current game if it is liked, else start at the newest like.
+  const id = next ? (isLiked(keepId) || fromHistory ? keepId : '') : keepId;
+  if (!fromHistory) {
+    try {
+      history.pushState({ g: id, liked: next ? 1 : 0 }, '', historyUrlFor(id));
+    } catch (_) {}
+  }
+  historySilent = true;
+  try {
+    renderFeed(readSortMode(), readMobileOnly(), { restore: false, landId: id });
+  } finally {
+    historySilent = false;
+  }
+  syncCanonicalUrl(currentGameId());
+  hideHint();
+}
+
 /**
  * Set or clear the tag filter. A new filter pushes one history entry so back
  * returns to the unfiltered feed; history-driven changes don't push.
@@ -2899,6 +3022,10 @@ function applyTagFilter(tag, { fromHistory = false, landId = '' } = {}) {
   if (next === activeTag && !fromHistory) return;
   const keepId = landId || currentGameId() || readLastId();
   activeTag = next;
+  if (next && activeLiked && !fromHistory) {
+    activeLiked = false;
+    syncLikedUI();
+  }
   syncTagUI();
   const inTag = !next || allGames.some((g) => g.id === keepId && gameTags(g).includes(next));
   const id = inTag ? keepId : '';
@@ -2938,6 +3065,10 @@ function applySearch(q) {
   if (next === activeSearch) return;
   const wasEmpty = !activeSearch;
   activeSearch = next;
+  if (next && activeLiked) {
+    activeLiked = false;
+    syncLikedUI();
+  }
   const pool = visibleGames(readSortMode(), readMobileOnly());
   const first = pool[0];
   if (next) analytics.trackSearch(next, pool.length);
@@ -3008,6 +3139,8 @@ function wireSearch() {
 function wireTagFilter() {
   syncTagUI();
   tagFilterEl?.addEventListener('click', () => applyTagFilter(''));
+  syncLikedUI();
+  likedFilterEl?.addEventListener('click', () => applyLikedFilter(false));
 }
 
 function wireMobileFilter() {
@@ -3096,8 +3229,8 @@ async function init() {
   // still land on the linked game (it used to fall to the tag's first card).
   const linkedId = deepLinkIdFromUrl();
   renderFeed(mode, mobileOnly, {
-    restore: !activeTag,
-    landId: activeTag ? linkedId : '',
+    restore: !activeTag && !activeLiked,
+    landId: activeTag || activeLiked ? linkedId : '',
     ensureId: linkedId,
   });
 

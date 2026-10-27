@@ -682,22 +682,79 @@ body {
   display: none;
 }
 
-.rail-btn.like .like-count {
+.like-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Like count is its own tap target: opens the Liked view (heart still toggles). */
+.like-stack .like-count {
+  appearance: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font: inherit;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
   line-height: 1;
+  min-width: 40px;
+  min-height: 24px;
+  padding: 5px 9px;
+  margin-top: -2px;
+  border-radius: 999px;
   color: rgba(255, 255, 255, 0.92);
+  background: rgba(0, 0, 0, 0.28);
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.65);
-  min-height: 11px;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
 }
 
-.rail-btn.like .like-count[hidden] {
-  display: none;
+.like-stack .like-count:active {
+  transform: scale(0.92);
 }
 
-.rail-btn.like.liked .like-count {
+.like-stack.liked .like-count {
   color: #ff3b5c;
+}
+
+.like-stack .like-count.active {
+  color: #fff;
+  background: rgba(255, 59, 92, 0.35);
+  border-color: rgba(255, 59, 92, 0.75);
+}
+
+.liked-filter.filter-btn.active {
+  background: rgba(255, 59, 92, 0.3);
+  border-color: rgba(255, 59, 92, 0.75);
+}
+
+.liked-filter[hidden] { display: none; }
+
+.empty.liked-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.liked-empty p { margin: 0; }
+
+.liked-empty .filter-btn {
+  font-size: 13px;
+  padding: 9px 16px;
+  color: #fff;
+}
+
+button.discover-more {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 750;
 }
 
 /* Comments: same stacked icon+count as like */
@@ -1383,3 +1440,6 @@ html.fit-letterbox .card .slide:nth-child(even).kb .slide-img {
   opacity: 1;
 }
 
+
+/* Liked view ignores the Mobile filter; hide it so the header stays one row on phones. */
+body.liked-view #mobileFilter { display: none; }
