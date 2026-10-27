@@ -682,55 +682,61 @@ body {
   display: none;
 }
 
-.like-stack {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-/* Like count is its own tap target: opens the Liked view (heart still toggles). */
-.like-stack .like-count {
-  appearance: none;
-  border: 1px solid transparent;
-  cursor: pointer;
-  font: inherit;
+.rail-btn.like .like-count {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
   line-height: 1;
-  min-width: 40px;
-  min-height: 24px;
-  padding: 5px 9px;
-  margin-top: -2px;
-  border-radius: 999px;
   color: rgba(255, 255, 255, 0.92);
-  background: rgba(0, 0, 0, 0.28);
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.65);
-  -webkit-tap-highlight-color: transparent;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
+  min-height: 11px;
 }
 
-.like-stack .like-count:active {
-  transform: scale(0.92);
+.rail-btn.like .like-count[hidden] {
+  display: none;
 }
 
-.like-stack.liked .like-count {
+.rail-btn.like.liked .like-count {
   color: #ff3b5c;
 }
 
-.like-stack .like-count.active {
+/* Header heart (top-left): toggles the Liked view. Outline off, filled red on. */
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.liked-toggle {
+  appearance: none;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-left: -6px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
   color: #fff;
-  background: rgba(255, 59, 92, 0.35);
-  border-color: rgba(255, 59, 92, 0.75);
+  cursor: pointer;
+  pointer-events: auto;
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.6));
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
 }
-
-.liked-filter.filter-btn.active {
-  background: rgba(255, 59, 92, 0.3);
-  border-color: rgba(255, 59, 92, 0.75);
+.liked-toggle:active { transform: scale(0.9); }
+.liked-toggle .heart-fill { display: none; }
+.liked-toggle.active {
+  color: #ff3b5c;
+  background: rgba(255, 59, 92, 0.18);
+  border-color: rgba(255, 59, 92, 0.6);
 }
-
-.liked-filter[hidden] { display: none; }
+.liked-toggle.active .heart-fill { display: inline; }
+.liked-toggle.active .heart-outline { display: none; }
 
 .empty.liked-empty {
   display: flex;

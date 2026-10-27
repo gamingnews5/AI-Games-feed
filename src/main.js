@@ -2481,8 +2481,7 @@ function buildCard(game, index) {
   const likeN = displayLikeCount(game);
   const cmtN = commentCount(game);
   // Always show a compact number so empty feeds aren't confusing (0 is fine).
-  // The count is its own button: tap it to show only liked games (heart still toggles).
-  const likeCountHtml = `<button type="button" class="like-count${activeLiked ? ' active' : ''}" aria-pressed="${activeLiked ? 'true' : 'false'}" aria-label="${activeLiked ? 'Show all games' : 'Show liked games'}" title="${activeLiked ? 'Show all games' : 'Show only games you liked'}">${escapeHtml(formatCompact(likeN))}</button>`;
+  const likeCountHtml = `<span class="like-count">${escapeHtml(formatCompact(likeN))}</span>`;
 
   card.innerHTML = `
     ${screenshot}
@@ -2519,7 +2518,6 @@ function buildCard(game, index) {
       ${playOrDownloadHtml(game)}
     </div>
     <div class="rail" aria-label="Actions">
-      <div class="like-stack ${liked ? 'liked' : ''}">
       <button type="button" class="rail-btn like ${liked ? 'liked' : ''}" aria-pressed="${liked ? 'true' : 'false'}" aria-label="${liked ? 'Unlike' : 'Like'}">
         <span class="rail-icon" aria-hidden="true">
           <svg class="icon-heart" viewBox="0 0 24 24" width="28" height="28">
@@ -2527,9 +2525,8 @@ function buildCard(game, index) {
             <path class="heart-fill" d="M12 21s-6.7-4.35-9.33-8.1C.8 10.35 1.2 6.9 3.9 5.25 6.1 3.9 8.7 4.35 12 7.2c3.3-2.85 5.9-3.3 8.1-1.95 2.7 1.65 3.1 5.1 1.23 7.65C18.7 16.65 12 21 12 21z" fill="currentColor"/>
           </svg>
         </span>
-      </button>
         ${likeCountHtml}
-      </div>
+      </button>
       <button type="button" class="rail-btn comments" aria-label="Comments">
         <span class="rail-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -2571,14 +2568,6 @@ function buildCard(game, index) {
   wireActiveVideoTap(card, game);
 
   const likeBtn = card.querySelector('.rail-btn.like');
-  const likeStack = card.querySelector('.like-stack');
-  const likeCountBtn = card.querySelector('.like-count');
-  likeCountBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
-  likeCountBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    applyLikedFilter(!activeLiked);
-  });
   likeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     // In the Liked view the card stays put after unlike (no re-render / scroll jump);
@@ -2586,11 +2575,10 @@ function buildCard(game, index) {
     const on = toggleLike(game.id);
     if (on) analytics.track('like', { game_id: game.id });
     likeBtn.classList.toggle('liked', on);
-    likeStack?.classList.toggle('liked', on);
     likeBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
     likeBtn.setAttribute('aria-label', on ? 'Unlike' : 'Like');
     syncLikeTotal();
-    const countSpan = likeCountBtn;
+    const countSpan = likeBtn.querySelector('.like-count');
     if (countSpan) {
       const n = remoteLikesOf(game) + (on ? 1 : 0);
       countSpan.textContent = formatCompact(n);
@@ -3122,7 +3110,7 @@ function syncTagUI() {
   tagFilterEl.setAttribute('aria-label', activeTag ? `Clear tag filter ${activeTag}` : '');
 }
 
-const likedFilterEl = document.getElementById('likedFilter');
+const likedToggleEl = document.getElementById('likedToggle');
 
 function syncLikeTotal() {
   if (!countEl) return;
@@ -3137,7 +3125,13 @@ function syncLikeTotal() {
 
 function syncLikedUI() {
   document.body.classList.toggle('liked-view', activeLiked);
-  if (likedFilterEl) likedFilterEl.hidden = !activeLiked;
+  if (likedToggleEl) {
+    likedToggleEl.classList.toggle('active', activeLiked);
+    likedToggleEl.setAttribute('aria-pressed', activeLiked ? 'true' : 'false');
+    const label = activeLiked ? 'Showing liked games — tap to show all' : 'Show only games you liked';
+    likedToggleEl.setAttribute('aria-label', label);
+    likedToggleEl.title = label;
+  }
 }
 
 /**
@@ -3306,7 +3300,11 @@ function wireTagFilter() {
   syncTagUI();
   tagFilterEl?.addEventListener('click', () => applyTagFilter(''));
   syncLikedUI();
-  likedFilterEl?.addEventListener('click', () => applyLikedFilter(false));
+  likedToggleEl?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    applyLikedFilter(!activeLiked);
+  });
 }
 
 function wireMobileFilter() {
