@@ -5,7 +5,8 @@
       "namespace": "android_app",
       "package_name": "ai.game.maker",
       "sha256_cert_fingerprints": [
-        "REPLACE_WITH_RELEASE_SHA256_FINGERPRINT_AA:BB:CC:..."
+        "D0:32:9C:F1:E3:8E:C8:04:B0:15:FF:D7:74:2C:7C:8F:84:1A:BE:3A:67:AB:52:54:17:C6:14:89:38:CD:36:9A",
+        "DD:E5:C0:9F:9B:59:40:3C:46:53:86:83:E3:83:C1:89:74:A3:E1:2F:31:6F:0B:DE:B4:66:CD:78:42:79:A1:D3"
       ]
     }
   }
