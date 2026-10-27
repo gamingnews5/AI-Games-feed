@@ -22,7 +22,10 @@ const MOBILE_KEY = 'opus-feed-mobile-only';
 const LAST_ID_KEY = 'opus-feed-last-id';
 const LIKES_KEY = 'opus-feed-likes';
 const SEEN_KEY = 'opus-feed-seen';
-const FIT_KEY = 'opus-feed-fit-mode';
+// v2: default flipped to full frame (letterbox). The v1 key held the old cover
+// default for most users, so it is dropped once; explicit toggles land in v2.
+const FIT_KEY = 'opus-feed-fit-mode-v2';
+const FIT_KEY_V1 = 'opus-feed-fit-mode';
 const SORT_TOP = 'top';
 const SORT_NEW = 'new';
 /** Cover = old cropped full-bleed; letterbox = contain + blurred bg fill. */
@@ -146,9 +149,16 @@ function readFitMode() {
     const v = localStorage.getItem(FIT_KEY);
     if (v === FIT_COVER || v === FIT_LETTERBOX) return v;
   } catch (_) {}
-  // Default: old cropped cover. Letterbox only after the user opts in.
-  return FIT_COVER;
+  // Default: full frame (contain + blurred fill). Cropped cover only after the user toggles.
+  return FIT_LETTERBOX;
 }
+
+function migrateFitMode() {
+  try {
+    localStorage.removeItem(FIT_KEY_V1);
+  } catch (_) {}
+}
+migrateFitMode();
 
 function writeFitMode(mode) {
   try {
@@ -2019,8 +2029,13 @@ function wireCreateSheet() {
       createPromptEl.focus();
       return;
     }
-    // Let the <a target=_blank> open the tab (no popup blocker), then close the sheet.
-    createSendEl.href = createUrlFor(text);
+    // window.open inside the tap (no popup blocker). 'noopener' but NOT 'noreferrer':
+    // omgithub auto-start checks document.referrer's origin (page policy is
+    // strict-origin-when-cross-origin, so only the origin is sent).
+    e.preventDefault();
+    const url = createUrlFor(text);
+    createSendEl.href = url;
+    window.open(url, '_blank', 'noopener');
     setTimeout(() => {
       createPromptEl.value = '';
       syncCreateSend();

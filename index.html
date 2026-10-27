@@ -18,7 +18,7 @@
     <title>AI Games Feed — Claude vs ChatGPT</title>
     <script>
       // Apply persisted fit mode before first paint so screenshots never flash cropped.
-      try { if (localStorage.getItem('opus-feed-fit-mode') === 'letterbox') document.documentElement.classList.add('fit-letterbox'); } catch (_) {}
+      try { if (localStorage.getItem('opus-feed-fit-mode-v2') !== 'cover') document.documentElement.classList.add('fit-letterbox'); } catch (_) { document.documentElement.classList.add('fit-letterbox'); }
     </script>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -44,7 +44,7 @@
       </div>
     </header>
     <main id="feed" class="feed" aria-label="Game feed"></main>
-    <a class="create-game" id="createGame" href="https://omgithub.com/" target="_blank" rel="noopener noreferrer" aria-label="Create a game" title="Create a game" aria-haspopup="dialog">
+    <a class="create-game" id="createGame" href="https://omgithub.com/" target="_blank" rel="noopener" referrerpolicy="strict-origin-when-cross-origin" aria-label="Create a game" title="Create a game" aria-haspopup="dialog">
       <span class="create-game-plus" aria-hidden="true"></span>
     </a>
     <div class="hint" id="hint">Swipe down ↓</div>
@@ -71,7 +71,7 @@
         <div class="create-body">
           <textarea id="createPrompt" class="create-prompt" rows="4" maxlength="4000" placeholder="Describe a game to build…" aria-label="Describe a game to build" enterkeyhint="enter"></textarea>
           <div class="create-actions">
-            <a id="createSend" class="create-send" href="https://omgithub.com/" target="_blank" rel="noopener" aria-disabled="true">Send ↗</a>
+            <a id="createSend" class="create-send" href="https://omgithub.com/" target="_blank" rel="noopener" referrerpolicy="strict-origin-when-cross-origin" aria-disabled="true">Send ↗</a>
           </div>
         </div>
       </div>
