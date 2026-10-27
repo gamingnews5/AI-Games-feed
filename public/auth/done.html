@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Back to Ai Game Maker</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#101211;color:#efe6d0;font:16px system-ui,sans-serif;text-align:center}
+  main{padding:24px;max-width:360px}
+  a.btn{display:block;margin:24px 0 12px;padding:16px;border-radius:16px;background:#55ad7b;color:#000;font-weight:700;text-decoration:none}
+  p.small{color:#a7ad9e;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <h1 style="font-size:20px">Almost signed in</h1>
+  <p>Tap below to finish signing in inside the Ai Game Maker app.</p>
+  <a class="btn" id="open" href="#">Return to Ai Game Maker</a>
+  <p class="small">This link works once and expires in a minute. If it fails, start sign-in again from the app.</p>
+</main>
+<script>
+  // Fallback for when Android did not hand this App Link to the app directly
+  // (link not yet verified, or the browser kept the redirect). No analytics on this page.
+  (function () {
+    var q = location.search;
+    var target = 'intent://android.omgithub.com/auth/done' + q + '#Intent;scheme=https;package=ai.game.maker;end';
+    document.getElementById('open').href = /Android/i.test(navigator.userAgent) ? target : '/';
+  })();
+</script>
+</body>
+</html>
