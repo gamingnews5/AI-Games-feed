@@ -14,7 +14,8 @@ if [ -f public/games.json ]; then mv public/games.json /tmp/feed-games.json.bak;
 npm run build
 cp dist/index.html dist/404.html          # unknown paths: feed shell with HTTP 404
 printf '/stats /stats/ 301\n' > dist/_redirects
-cat > dist/_headers <<'H'
+# public/_headers (copied into dist/ by vite) wins; fall back to the default rules.
+[ -f dist/_headers ] || cat > dist/_headers <<'H'
 /*
   Cache-Control: no-cache, must-revalidate
   Expires: 0
