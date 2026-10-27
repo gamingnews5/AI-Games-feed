@@ -222,7 +222,8 @@ export function attachCreateFx({ sheet, prompt, send, getTitle, onFill }) {
     const last = lines[lines.length - 1] || '';
     const x = Math.min(r.right - 14, r.left + 14 + (last.length % 40) * 8.6);
     const y = Math.min(r.bottom - 10, r.top + 22 + (lines.length - 1 + Math.floor(last.length / 40)) * 22);
-    return [x / window.innerWidth, 1 - y / window.innerHeight];
+    const L = layer.getBoundingClientRect();
+    return [(x - L.left) / (L.width || 1), 1 - (y - L.top) / (L.height || 1)];
   };
   const kick = () => { if (neb.running()) { const [x, y] = caretPoint(); neb.pulse(x, y); } };
 

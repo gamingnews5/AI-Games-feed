@@ -1966,8 +1966,42 @@ function syncCreateSend() {
 /** Keep the panel above the on-screen keyboard (fixed bottom sits under it on mobile). */
 const CREATE_WARP_OPEN_MS = 600;
 
+/* AiGameMaker app (v2.0.4+) keyboard sync: the app pushes the keyboard height every
+ * frame as --kb (px) on <html> and sets html.kb-anim while it animates. Once --kb is
+ * seen, html.app-kb locks the feed + sheet to the keyboard-less height (--app-h) so the
+ * WebView resize can't snap them, and the composer rides translate: 0 -var(--kb) with
+ * no transition. Plain web (no --kb ever set) keeps the visualViewport path. */
+let appKbOn = false;
+function wireAppKeyboard() {
+  const root = document.documentElement;
+  const kbPx = () => parseFloat(root.style.getPropertyValue('--kb')) || 0;
+  let lastH = '';
+  const syncAppH = () => {
+    if (kbPx() > 0 || root.classList.contains('kb-anim')) return;
+    const h = `${window.innerHeight}px`;
+    if (h !== lastH) { lastH = h; root.style.setProperty('--app-h', h); }
+  };
+  const check = () => {
+    if (!appKbOn && root.style.getPropertyValue('--kb') !== '') {
+      appKbOn = true;
+      syncAppH();
+      root.classList.add('app-kb');
+      createSheetEl?.style.removeProperty('--kb');
+    }
+    if (appKbOn) syncAppH();
+  };
+  check();
+  new MutationObserver(check).observe(root, { attributes: true, attributeFilter: ['style', 'class'] });
+  window.addEventListener('resize', () => { if (appKbOn) syncAppH(); });
+}
+
 function syncCreateKeyboard() {
   if (!createSheetEl) return;
+  if (appKbOn) {
+    // The app drives --kb on <html> every frame; don't shadow it on the sheet.
+    createSheetEl.style.removeProperty('--kb');
+    return;
+  }
   const vv = window.visualViewport;
   const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
   createSheetEl.style.setProperty('--kb', `${Math.round(kb)}px`);
@@ -3478,6 +3512,7 @@ async function init() {
   wireAudioGesture();
   wireCommentsSheet();
   wireCreateSheet();
+  wireAppKeyboard();
   wireHistoryNavigation();
 
   const mode = readSortMode();

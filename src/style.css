@@ -1504,3 +1504,17 @@ body.liked-view #mobileFilter { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .create-game.bounce, .create-game.glow .create-game-plus, .create-send:not(.disabled) { animation: none; }
 }
+
+/* AiGameMaker app keyboard sync (html.app-kb set once the app pushes --kb). */
+html.app-kb .feed { height: var(--app-h, 100vh); }
+html.app-kb .create-sheet {
+  top: 0;
+  bottom: auto;
+  height: var(--app-h, 100vh);
+  padding-bottom: 0;
+}
+html.app-kb .create-sheet .create-panel {
+  /* Individual translate composes with the open/close + warp transforms; it is not in
+     any transition list, so the app's per-frame --kb moves it 1:1. */
+  translate: 0 calc(-1 * var(--kb, 0px));
+}
