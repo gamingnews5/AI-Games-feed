@@ -1,3 +1,5 @@
+import { attachCreateFx } from './create-fx.js';
+import './create-fx.css';
 import {
   fetchCatalogFeed,
   REPO_RAW_BASE,
@@ -1972,15 +1974,25 @@ const CREATE_WARP_OPEN_MS = 600;
  * WebView resize can't snap them, and the composer rides translate: 0 -var(--kb) with
  * no transition. Plain web (no --kb ever set) keeps the visualViewport path. */
 let appKbOn = false;
+let appKbResync = () => {};
 function wireAppKeyboard() {
   const root = document.documentElement;
   const kbPx = () => parseFloat(root.style.getPropertyValue('--kb')) || 0;
   let lastH = '';
+  let lastPx = 0;
+  // --app-h must never stay below the real window: a stale lock clipped the bottom of
+  // the feed (Play) when the app's --kb was non-zero while the WebView grew (late
+  // layout, rotation, insets). Growth is never the keyboard, so always accept it, and
+  // only hold a shrink while the composer is open and the keyboard is up/animating.
   const syncAppH = () => {
-    if (kbPx() > 0 || root.classList.contains('kb-anim')) return;
-    const h = `${window.innerHeight}px`;
+    const px = window.innerHeight;
+    const kbBusy = kbPx() > 0 || root.classList.contains('kb-anim');
+    if (px < lastPx && createOpen && kbBusy) return;
+    const h = `${px}px`;
+    lastPx = px;
     if (h !== lastH) { lastH = h; root.style.setProperty('--app-h', h); }
   };
+  appKbResync = () => { if (appKbOn) syncAppH(); };
   const check = () => {
     if (!appKbOn && root.style.getPropertyValue('--kb') !== '') {
       appKbOn = true;
@@ -2042,33 +2054,26 @@ function warmOmgithub() {
     .catch(() => { omgithubAssetsWarmed = false; });
 }
 
-/* Create-sheet effects live in a lazy chunk (typewriter, chips, nebula, warp),
- * fetched on first touch of ＋ so the feed bundle stays lean. */
+/* Create-sheet extras (typewriter, chips, Send ripple, warp) — small, so inlined. */
 let createFx = null;
-let createFxLoad = null;
 let createLaunching = false;
 function loadCreateFx() {
-  if (!createFxLoad) {
-    createFxLoad = import('./create-fx.js')
-      .then((m) => {
-        createFx = m.attachCreateFx({
-          sheet: createSheetEl,
-          prompt: createPromptEl,
-          send: createSendEl,
-          getTitle: () => allGames.find((g) => g.id === currentGameId())?.title || '',
-          onFill: () => { syncCreateSend(); warmOmgithub(); },
-        });
-        return createFx;
-      })
-      .catch(() => { createFxLoad = null; return null; });
+  if (!createFx && createSheetEl && createPromptEl && createSendEl) {
+    createFx = attachCreateFx({
+      sheet: createSheetEl,
+      prompt: createPromptEl,
+      send: createSendEl,
+      getTitle: () => allGames.find((g) => g.id === currentGameId())?.title || '',
+      onFill: () => { syncCreateSend(); warmOmgithub(); },
+    });
   }
-  return createFxLoad;
+  return createFx;
 }
 
 function openCreateSheet() {
   if (!createSheetEl || createOpen) return;
   warmOmgithub();
-  loadCreateFx().then((fx) => { if (fx && createOpen) fx.open(); });
+  loadCreateFx()?.open();
   if (commentsOpen) closeCommentsSheet();
   createOpen = true;
   autoAdvancePaused = true;
@@ -2086,6 +2091,7 @@ function openCreateSheet() {
 function closeCreateSheet() {
   if (!createSheetEl || !createOpen) return;
   createOpen = false;
+  appKbResync();
   createFx?.close();
   createLaunching = false;
   createSendEl?.classList.remove('launching');
@@ -2126,22 +2132,13 @@ function wireCreateSheet() {
     btn.classList.remove('bounce');
     void btn.offsetWidth;
     btn.classList.add('bounce');
-    btn.classList.remove('glow');
     openCreateSheet();
   });
   // Start warming on first touch/hover of ＋, before the click lands.
-  const warmAll = () => { warmOmgithub(); loadCreateFx(); };
+  const warmAll = () => { warmOmgithub(); };
   btn.addEventListener('pointerdown', warmAll, { passive: true });
   btn.addEventListener('pointerenter', warmAll, { passive: true });
   btn.addEventListener('animationend', () => btn.classList.remove('bounce'));
-  // One soft glow ring per session to hint at ＋.
-  try {
-    if (!sessionStorage.getItem('opus-feed-plus-glow')) {
-      sessionStorage.setItem('opus-feed-plus-glow', '1');
-      setTimeout(() => btn.classList.add('glow'), 2500);
-      setTimeout(() => btn.classList.remove('glow'), 2500 + 3300);
-    }
-  } catch (_) {}
   createSheetEl.querySelectorAll('[data-close-create]').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();

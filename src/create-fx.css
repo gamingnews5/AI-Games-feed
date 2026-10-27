@@ -1,46 +1,10 @@
-/* Create-sheet effects (lazy). Panel goes glassy so the nebula shows through. */
-.create-sheet.fx .comments-backdrop {
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
-.fx-nebula {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  opacity: 0;
-  transition: opacity 0.35s ease;
-  pointer-events: none;
-}
-.create-sheet.open .fx-nebula { opacity: 1; }
-.fx-nebula canvas { width: 100%; height: 100%; display: block; }
-.fx-nebula.css {
-  --fx-hue: 0deg;
-  background:
-    radial-gradient(60% 45% at 30% 30%, rgba(124, 92, 255, 0.55), transparent 70%),
-    radial-gradient(55% 40% at 75% 60%, rgba(37, 244, 238, 0.35), transparent 70%),
-    radial-gradient(50% 50% at 50% 90%, rgba(254, 44, 85, 0.35), transparent 70%),
-    #07040f;
-  background-size: 160% 160%;
-  filter: hue-rotate(var(--fx-hue));
-  transition: opacity 0.35s ease, filter 0.4s ease;
-}
-.fx-nebula.css.run { animation: fx-drift 14s ease-in-out infinite alternate; }
-.fx-nebula.css.kick { animation: fx-drift 14s ease-in-out infinite alternate, fx-kick 0.35s ease-out; }
-@keyframes fx-drift { from { background-position: 0% 0%; } to { background-position: 100% 100%; } }
-@keyframes fx-kick { 0% { transform: scale(1.03); } 100% { transform: scale(1); } }
-
+/* Create-sheet extras. Plain sheet shell (no blur / spring); simple static background. */
 .create-sheet.fx .create-panel {
-  background: rgba(14, 12, 24, 0.72);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-.create-sheet.fx:not(.fx-still) .create-panel {
-  transition: transform 0.55s cubic-bezier(0.34, 1.45, 0.5, 1);
+  background: linear-gradient(180deg, #1c1733 0%, #15131c 55%, #141414 100%);
 }
 
 .fx-prompt-wrap { position: relative; }
-.fx-prompt-wrap .create-prompt { position: relative; z-index: 1; background: rgba(255, 255, 255, 0.07); }
+.fx-prompt-wrap .create-prompt { position: relative; z-index: 1; }
 .fx-ghost {
   position: absolute;
   inset: 0;
@@ -60,7 +24,6 @@
   margin-left: 1px;
   vertical-align: -0.2em;
   background: #b9a6ff;
-  box-shadow: 0 0 8px #7c5cff;
   animation: fx-blink 1s steps(1) infinite;
 }
 @keyframes fx-blink { 50% { opacity: 0; } }
@@ -98,7 +61,7 @@
 }
 .fx-chip:active { transform: scale(0.94); background: rgba(124, 92, 255, 0.35); border-color: rgba(185, 166, 255, 0.8); }
 
-/* Send: ripple + launch */
+/* Send press ripple */
 .fx-ripple {
   position: absolute;
   width: 12px;
@@ -111,20 +74,45 @@
 }
 @keyframes fx-ripple { to { transform: scale(18); opacity: 0; } }
 
-/* Warp */
+/* Warp jump on Send (~0.8s): streaks + shockwave + prompt flies to centre + flash */
+.fx-warp-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, #2a1b5e 0, #0a0716 65%);
+  animation: fx-fade-in 0.18s ease-out;
+}
+.fx-streaks {
+  position: absolute;
+  inset: -50%;
+  background: repeating-conic-gradient(from 0deg at 50% 50%, transparent 0deg 4deg, rgba(200, 220, 255, 0.55) 4deg 4.6deg, transparent 4.6deg 9deg, rgba(185, 166, 255, 0.4) 9deg 9.4deg);
+  -webkit-mask: radial-gradient(circle at 50% 50%, transparent 0 6%, #000 30%);
+  mask: radial-gradient(circle at 50% 50%, transparent 0 6%, #000 30%);
+  animation: fx-hyper 0.8s cubic-bezier(0.5, 0, 0.9, 0.4) forwards;
+}
+.fx-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border-radius: 50%;
+  border: 3px solid rgba(185, 166, 255, 0.9);
+  box-shadow: 0 0 24px rgba(124, 92, 255, 0.9);
+  opacity: 0;
+  animation: fx-ring 0.55s ease-out 0.3s forwards;
+}
+@keyframes fx-fade-in { from { opacity: 0; } }
+@keyframes fx-hyper { from { transform: scale(0.6) rotate(0deg); opacity: 0.2; } to { transform: scale(3) rotate(6deg); opacity: 1; } }
+@keyframes fx-ring { 0% { transform: scale(0.2); opacity: 1; } 100% { transform: scale(22); opacity: 0; } }
 .create-sheet.fx-warp .create-panel {
   transform: translateY(0) scale(0.92);
   opacity: 0;
   transition: transform 0.6s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.5s ease 0.15s;
 }
-.create-sheet.fx-warp .fx-nebula { opacity: 1; }
-.create-sheet.fx-warp .fx-nebula.css {
-  background:
-    repeating-conic-gradient(from 0deg at 50% 50%, rgba(255, 255, 255, 0.0) 0deg 4deg, rgba(200, 220, 255, 0.55) 4deg 5deg),
-    radial-gradient(circle at 50% 50%, #fff 0, rgba(124, 92, 255, 0.6) 20%, #07040f 70%);
-  animation: fx-hyper 0.8s cubic-bezier(0.5, 0, 0.9, 0.4) forwards;
-}
-@keyframes fx-hyper { from { transform: scale(1); } to { transform: scale(3.2); } }
 .create-sheet.fx-flash::after {
   content: "";
   position: fixed;
@@ -150,14 +138,12 @@
   animation: fx-fly 0.78s cubic-bezier(0.55, 0, 0.85, 0.35) forwards;
 }
 @keyframes fx-fly {
-  0% { transform: translate(0, 0) scale(1); opacity: 1; filter: blur(0); }
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
   70% { opacity: 1; }
-  100% { transform: translate(var(--dx), var(--dy)) scale(0.08); opacity: 0; filter: blur(2px); }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0.08); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fx-nebula, .fx-nebula.css, .fx-nebula.css.run { animation: none !important; transition: none !important; }
-  .create-sheet.fx .create-panel { transition: none !important; }
-  .fx-caret, .fx-ripple, .fx-fly { animation: none !important; }
+  .fx-caret, .fx-ripple, .fx-fly, .fx-streaks, .fx-ring { animation: none !important; }
   .fx-chip { transition: none; }
 }
