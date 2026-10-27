@@ -77,8 +77,27 @@ let watchAccumSec = 0;
 let accumGameId = null;
 /** Suppress auto-advance once (e.g. after Play opens external). */
 let autoAdvancePaused = false;
-/** User's audio preference; first load defaults to muted like Instagram/TikTok. */
-let mutedPreference = true;
+const MUTED_KEY = 'opus-feed-muted';
+/** Inside the Ai Game Maker Android app (UA token) or its host: sound on by default. */
+function inAiGameMakerApp() {
+  return /AiGameMaker\//.test(navigator.userAgent || '') || window.location.hostname === 'android.omgithub.com';
+}
+/** Saved mute toggle ('1'/'0') wins; else muted by default like Instagram/TikTok, except in the app. */
+function readMutedPreference() {
+  try {
+    const v = localStorage.getItem(MUTED_KEY);
+    if (v === '1') return true;
+    if (v === '0') return false;
+  } catch (_) {}
+  return !inAiGameMakerApp();
+}
+function writeMutedPreference(muted) {
+  try {
+    localStorage.setItem(MUTED_KEY, muted ? '1' : '0');
+  } catch (_) {}
+}
+/** User's audio preference. */
+let mutedPreference = readMutedPreference();
 /** Temporary mute used only when the browser rejects autoplay with sound. */
 let autoplayFallbackMuted = false;
 let userGestureUnlocked = false;
@@ -229,6 +248,7 @@ function applyMuteState() {
 
 function setMutedPreference(muted) {
   mutedPreference = Boolean(muted);
+  writeMutedPreference(mutedPreference);
   autoplayFallbackMuted = false;
   userGestureUnlocked = true;
   applyMuteState();
