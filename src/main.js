@@ -587,6 +587,20 @@ function shareUrlFor(id) {
   return publicUrlFor(id).toString();
 }
 
+/**
+ * URL for history.pushState/replaceState: same params as publicUrlFor, but always on
+ * this page's own origin. Cross-origin pushState throws, so on hosts that are not in
+ * SITES (android.omgithub.com app wrapper, previews) history would get no entries.
+ * On known hosts this equals shareUrlFor.
+ */
+function historyUrlFor(id = '') {
+  const u = publicUrlFor(id);
+  const here = new URL(window.location.href);
+  u.protocol = here.protocol;
+  u.host = here.host;
+  return u.toString();
+}
+
 function syncCanonicalUrl(id = '') {
   const canonical = document.querySelector('link[rel="canonical"]');
   const ogUrl = document.querySelector('meta[property="og:url"]');
@@ -602,7 +616,7 @@ function currentGameId() {
 
 function syncUrlForGame(id) {
   if (!id || restoring || historySilent) return;
-  const next = shareUrlFor(id);
+  const next = historyUrlFor(id);
   try {
     // Landing card replaces the entry so the first back still leaves the site.
     // Later cards push, so back returns to the previous game.
@@ -2890,7 +2904,7 @@ function applyTagFilter(tag, { fromHistory = false, landId = '' } = {}) {
   const id = inTag ? keepId : '';
   if (!fromHistory) {
     try {
-      const url = publicUrlFor(id).toString();
+      const url = historyUrlFor(id);
       history.pushState({ g: id, tag: next }, '', url);
     } catch (_) {}
   }
@@ -2929,7 +2943,7 @@ function applySearch(q) {
   if (next) analytics.trackSearch(next, pool.length);
   const id = first?.id || '';
   try {
-    const url = publicUrlFor(id).toString();
+    const url = historyUrlFor(id);
     if (wasEmpty && next && !searchEntryPushed) {
       history.pushState({ g: id, search: next }, '', url);
       searchEntryPushed = true;
