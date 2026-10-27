@@ -44,7 +44,7 @@
       </div>
     </header>
     <main id="feed" class="feed" aria-label="Game feed"></main>
-    <a class="create-game" href="https://omgithub.com/" target="_blank" rel="noopener noreferrer" aria-label="Create a game" title="Create a game">
+    <a class="create-game" id="createGame" href="https://omgithub.com/" target="_blank" rel="noopener noreferrer" aria-label="Create a game" title="Create a game" aria-haspopup="dialog">
       <span class="create-game-plus" aria-hidden="true"></span>
     </a>
     <div class="hint" id="hint">Swipe down ↓</div>
@@ -58,6 +58,22 @@
           <button type="button" class="comments-close" aria-label="Close comments" data-close-comments>&times;</button>
         </header>
         <div class="comments-list" id="commentsList"></div>
+      </div>
+    </div>
+    <div id="createSheet" class="comments-sheet create-sheet" hidden aria-hidden="true">
+      <div class="comments-backdrop" data-close-create></div>
+      <div class="comments-panel create-panel" role="dialog" aria-modal="true" aria-labelledby="createTitle">
+        <div class="comments-grab" aria-hidden="true"><span class="comments-handle"></span></div>
+        <header class="comments-header">
+          <h2 id="createTitle" class="comments-title">Create a game</h2>
+          <button type="button" class="comments-close" aria-label="Close" data-close-create>&times;</button>
+        </header>
+        <div class="create-body">
+          <textarea id="createPrompt" class="create-prompt" rows="4" maxlength="4000" placeholder="Describe a game to build…" aria-label="Describe a game to build" enterkeyhint="enter"></textarea>
+          <div class="create-actions">
+            <a id="createSend" class="create-send" href="https://omgithub.com/" target="_blank" rel="noopener" aria-disabled="true">Send ↗</a>
+          </div>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>

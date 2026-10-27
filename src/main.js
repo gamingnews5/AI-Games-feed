@@ -693,6 +693,9 @@ function onHistoryPop() {
   if (commentsOpen && state.opus !== 'comments') {
     closeCommentsSheet();
   }
+  if (createOpen && state.opus !== 'create') {
+    closeCreateSheet();
+  }
   if (state.opus) return;
   const urlLiked = likedFromUrl();
   if (urlLiked !== activeLiked) {
@@ -1899,6 +1902,135 @@ function closeCommentsSheet() {
   }
 }
 
+/* ---- Create a game sheet (bottom ＋) → omgithub.com composer ---- */
+const CREATE_ORIGIN = 'https://omgithub.com/';
+const createSheetEl = document.getElementById('createSheet');
+const createPromptEl = document.getElementById('createPrompt');
+const createSendEl = document.getElementById('createSend');
+let createOpen = false;
+
+/** Same encoding as omgithub's promptLoginReturn: base64url(utf8), no padding. */
+function encodeLoginPrompt(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  bytes.forEach((b) => { bin += String.fromCharCode(b); });
+  return btoa(bin).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+}
+
+function createUrlFor(text) {
+  const u = new URL(CREATE_ORIGIN);
+  u.searchParams.set('loginPrompt', encodeLoginPrompt(text));
+  u.searchParams.set('autostart', '1');
+  u.searchParams.set('from', 'feed');
+  return u.toString();
+}
+
+function syncCreateSend() {
+  if (!createSendEl || !createPromptEl) return;
+  const text = createPromptEl.value.trim();
+  createSendEl.setAttribute('aria-disabled', text ? 'false' : 'true');
+  createSendEl.classList.toggle('disabled', !text);
+  createSendEl.href = text ? createUrlFor(text) : CREATE_ORIGIN;
+}
+
+/** Keep the panel above the on-screen keyboard (fixed bottom sits under it on mobile). */
+function syncCreateKeyboard() {
+  if (!createSheetEl) return;
+  const vv = window.visualViewport;
+  const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+  createSheetEl.style.setProperty('--kb', `${Math.round(kb)}px`);
+}
+
+function openCreateSheet() {
+  if (!createSheetEl || createOpen) return;
+  if (commentsOpen) closeCommentsSheet();
+  createOpen = true;
+  autoAdvancePaused = true;
+  createSheetEl.hidden = false;
+  createSheetEl.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('comments-open', 'create-open');
+  syncCreateSend();
+  // Focus inside the tap so mobile browsers open the keyboard.
+  try { createPromptEl?.focus({ preventScroll: true }); } catch (_) {}
+  requestAnimationFrame(() => createSheetEl.classList.add('open'));
+  syncCreateKeyboard();
+  pushOverlayHistory('create');
+}
+
+function closeCreateSheet() {
+  if (!createSheetEl || !createOpen) return;
+  createOpen = false;
+  createPromptEl?.blur();
+  createSheetEl.classList.remove('open');
+  document.body.classList.remove('comments-open', 'create-open');
+  createSheetEl.setAttribute('aria-hidden', 'true');
+  const panel = createSheetEl.querySelector('.comments-panel');
+  const done = () => {
+    if (createOpen) return;
+    createSheetEl.hidden = true;
+    autoAdvancePaused = false;
+  };
+  if (panel) {
+    panel.addEventListener('transitionend', done, { once: true });
+    setTimeout(done, 320);
+  } else {
+    done();
+  }
+}
+
+function dismissCreateSheet() {
+  if (history.state && history.state.opus === 'create') {
+    history.back();
+    return;
+  }
+  closeCreateSheet();
+}
+
+function wireCreateSheet() {
+  const btn = document.getElementById('createGame');
+  if (!btn || !createSheetEl || !createPromptEl || !createSendEl) return;
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openCreateSheet();
+  });
+  createSheetEl.querySelectorAll('[data-close-create]').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissCreateSheet();
+    });
+  });
+  createPromptEl.addEventListener('input', syncCreateSend);
+  createPromptEl.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      dismissCreateSheet();
+    } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      createSendEl.click();
+    }
+  });
+  createSendEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const text = createPromptEl.value.trim();
+    if (!text) {
+      e.preventDefault();
+      createPromptEl.focus();
+      return;
+    }
+    // Let the <a target=_blank> open the tab (no popup blocker), then close the sheet.
+    createSendEl.href = createUrlFor(text);
+    setTimeout(() => {
+      createPromptEl.value = '';
+      syncCreateSend();
+      dismissCreateSheet();
+    }, 0);
+  });
+  window.visualViewport?.addEventListener('resize', () => { if (createOpen) syncCreateKeyboard(); });
+  window.visualViewport?.addEventListener('scroll', () => { if (createOpen) syncCreateKeyboard(); });
+}
+
 function wireCommentsSheet() {
   if (!commentsSheetEl) return;
   commentsSheetEl.querySelectorAll('[data-close-comments]').forEach((el) => {
@@ -2410,7 +2542,6 @@ function buildCard(game, index) {
   likeCountBtn?.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!activeLiked) analytics.track('liked_filter', { game_id: game.id });
     applyLikedFilter(!activeLiked);
   });
   likeBtn.addEventListener('click', (e) => {
@@ -2782,7 +2913,7 @@ function wireKeyboard() {
   if (keyboardWired) return;
   keyboardWired = true;
   window.addEventListener('keydown', (e) => {
-    if (commentsOpen) return;
+    if (commentsOpen || createOpen) return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'j') {
       e.preventDefault();
       const current = currentIndexFromScroll();
@@ -3215,6 +3346,7 @@ async function init() {
 
   wireAudioGesture();
   wireCommentsSheet();
+  wireCreateSheet();
   wireHistoryNavigation();
 
   const mode = readSortMode();
@@ -3297,8 +3429,8 @@ function wireVisibility() {
       if (video) video.pause();
       else pauseSlides();
     } else {
-      // Stay paused while comments or iframe Play overlay is open.
-      if (commentsOpen) return;
+      // Stay paused while comments, create sheet or iframe Play overlay is open.
+      if (commentsOpen || createOpen) return;
       // Back from background / external Play: start accum fresh if Play
       // cancelled this card, then resume playback.
       if (autoAdvancePaused) {

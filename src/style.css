@@ -1443,3 +1443,47 @@ html.fit-letterbox .card .slide:nth-child(even).kb .slide-img {
 
 /* Liked view ignores the Mobile filter; hide it so the header stays one row on phones. */
 body.liked-view #mobileFilter { display: none; }
+
+/* Create a game sheet (reuses the comments sheet shell) */
+.create-sheet { padding-bottom: var(--kb, 0px); }
+.create-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 6px;
+}
+.create-prompt {
+  width: 100%;
+  min-height: 112px;
+  max-height: 40dvh;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: inherit;
+  font-size: 16px; /* >=16px: no iOS zoom on focus */
+  line-height: 1.4;
+  outline: none;
+}
+.create-prompt:focus { border-color: rgba(124, 92, 255, 0.8); }
+.create-prompt::placeholder { color: rgba(255, 255, 255, 0.45); }
+.create-actions { display: flex; justify-content: flex-end; }
+.create-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 22px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 750;
+  text-decoration: none;
+  transition: background 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
+}
+.create-send:active { transform: scale(0.97); }
+.create-send.disabled { opacity: 0.4; pointer-events: auto; cursor: not-allowed; }
