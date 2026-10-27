@@ -289,6 +289,38 @@ function rewriteHtml(res, url, site, poster) {
   return new Response(out.body, { status: out.status, statusText: out.statusText, headers });
 }
 
+/* Create sheet warm-up: omgithub.com's current hashed entry JS/CSS (read live from
+ * its HTML, edge-cached 60s) so the feed can <link rel=prefetch> them while the
+ * user types. Nothing is hardcoded; on any failure it returns an empty list. */
+const OMGITHUB_ORIGIN = 'https://omgithub.com';
+async function omgithubPreloadResponse() {
+  let assets = [];
+  try {
+    const res = await fetch(OMGITHUB_ORIGIN + '/', {
+      headers: { accept: 'text/html' },
+      cf: { cacheTtl: 60, cacheEverything: true },
+    });
+    if (res.ok) {
+      const html = (await res.text()).slice(0, 200000);
+      const seen = new Set();
+      const re = /<(?:script|link)\b[^>]*?(?:src|href)=["'](\/assets\/[^"'?#]+\.(?:js|css))["'][^>]*>/gi;
+      let m;
+      while ((m = re.exec(html)) && seen.size < 8) {
+        const tag = m[0];
+        if (/^<link/i.test(tag) && !/rel=["']?(?:stylesheet|modulepreload)/i.test(tag)) continue;
+        seen.add(OMGITHUB_ORIGIN + m[1]);
+      }
+      assets = [...seen];
+    }
+  } catch (_) {}
+  return new Response(JSON.stringify({ origin: OMGITHUB_ORIGIN, assets }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': assets.length ? 'public, max-age=60' : 'no-store',
+    },
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -297,6 +329,7 @@ export default {
 
     if (path === '/robots.txt') return textResponse(robotsTxt(site, preview), 'text/plain; charset=utf-8');
     if (path === '/catalog.json') return catalogJsonResponse(ctx, env, request);
+    if (path === '/omgithub-preload.json') return omgithubPreloadResponse();
     if (path === '/sitemap.xml') return textResponse(await sitemapXml(site, ctx, env, request), 'application/xml; charset=utf-8');
     if (path === '/stats') {
       const to = new URL(url);

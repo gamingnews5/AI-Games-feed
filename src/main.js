@@ -1971,8 +1971,44 @@ function syncCreateKeyboard() {
   createSheetEl.style.setProperty('--kb', `${Math.round(kb)}px`);
 }
 
+/* Warm omgithub.com so Send opens the composer fast. Connections and the HTTP cache
+ * are partitioned by top-level site: this pays off from games.omgithub.com (same site
+ * as omgithub.com); from lolgames.net only the server-side edge warm-up applies, so
+ * there we skip the asset prefetch (it would just download twice). */
+const sameSiteAsOmgithub = /(^|\.)omgithub\.com$/.test(location.hostname);
+let omgithubConnectAt = 0;
+let omgithubAssetsWarmed = false;
+function addHeadLink(rel, href, extra) {
+  const l = document.createElement('link');
+  l.rel = rel;
+  l.href = href;
+  if (extra) Object.assign(l, extra);
+  document.head.appendChild(l);
+  return l;
+}
+function warmOmgithub() {
+  // Preconnect without crossorigin = the credentialed pool the navigation and the
+  // page's same-origin module script use. Re-hint after ~8s (idle sockets close).
+  const now = Date.now();
+  if (now - omgithubConnectAt > 8000) {
+    omgithubConnectAt = now;
+    addHeadLink('preconnect', CREATE_ORIGIN.replace(/\/$/, ''));
+  }
+  if (omgithubAssetsWarmed || !sameSiteAsOmgithub) return;
+  omgithubAssetsWarmed = true;
+  fetch('/omgithub-preload.json', { credentials: 'omit' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      (d?.assets || []).forEach((u) => {
+        if (typeof u === 'string' && u.startsWith(CREATE_ORIGIN + 'assets/')) addHeadLink('prefetch', u);
+      });
+    })
+    .catch(() => { omgithubAssetsWarmed = false; });
+}
+
 function openCreateSheet() {
   if (!createSheetEl || createOpen) return;
+  warmOmgithub();
   if (commentsOpen) closeCommentsSheet();
   createOpen = true;
   autoAdvancePaused = true;
@@ -2024,13 +2060,16 @@ function wireCreateSheet() {
     e.stopPropagation();
     openCreateSheet();
   });
+  // Start warming on first touch/hover of ＋, before the click lands.
+  btn.addEventListener('pointerdown', warmOmgithub, { passive: true });
+  btn.addEventListener('pointerenter', warmOmgithub, { passive: true });
   createSheetEl.querySelectorAll('[data-close-create]').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
       dismissCreateSheet();
     });
   });
-  createPromptEl.addEventListener('input', syncCreateSend);
+  createPromptEl.addEventListener('input', () => { syncCreateSend(); warmOmgithub(); });
   createPromptEl.addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.key === 'Escape') {
