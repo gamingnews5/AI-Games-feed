@@ -1964,6 +1964,8 @@ function syncCreateSend() {
 }
 
 /** Keep the panel above the on-screen keyboard (fixed bottom sits under it on mobile). */
+const CREATE_WARP_OPEN_MS = 600;
+
 function syncCreateKeyboard() {
   if (!createSheetEl) return;
   const vv = window.visualViewport;
@@ -2006,9 +2008,33 @@ function warmOmgithub() {
     .catch(() => { omgithubAssetsWarmed = false; });
 }
 
+/* Create-sheet effects live in a lazy chunk (typewriter, chips, nebula, warp),
+ * fetched on first touch of ＋ so the feed bundle stays lean. */
+let createFx = null;
+let createFxLoad = null;
+let createLaunching = false;
+function loadCreateFx() {
+  if (!createFxLoad) {
+    createFxLoad = import('./create-fx.js')
+      .then((m) => {
+        createFx = m.attachCreateFx({
+          sheet: createSheetEl,
+          prompt: createPromptEl,
+          send: createSendEl,
+          getTitle: () => allGames.find((g) => g.id === currentGameId())?.title || '',
+          onFill: () => { syncCreateSend(); warmOmgithub(); },
+        });
+        return createFx;
+      })
+      .catch(() => { createFxLoad = null; return null; });
+  }
+  return createFxLoad;
+}
+
 function openCreateSheet() {
   if (!createSheetEl || createOpen) return;
   warmOmgithub();
+  loadCreateFx().then((fx) => { if (fx && createOpen) fx.open(); });
   if (commentsOpen) closeCommentsSheet();
   createOpen = true;
   autoAdvancePaused = true;
@@ -2026,6 +2052,10 @@ function openCreateSheet() {
 function closeCreateSheet() {
   if (!createSheetEl || !createOpen) return;
   createOpen = false;
+  createFx?.close();
+  createLaunching = false;
+  createSendEl?.classList.remove('launching');
+  createSendEl?.removeAttribute('aria-label');
   createPromptEl?.blur();
   createSheetEl.classList.remove('open');
   document.body.classList.remove('comments-open', 'create-open');
@@ -2058,11 +2088,26 @@ function wireCreateSheet() {
   btn.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
+    try { navigator.vibrate?.(10); } catch (_) {}
+    btn.classList.remove('bounce');
+    void btn.offsetWidth;
+    btn.classList.add('bounce');
+    btn.classList.remove('glow');
     openCreateSheet();
   });
   // Start warming on first touch/hover of ＋, before the click lands.
-  btn.addEventListener('pointerdown', warmOmgithub, { passive: true });
-  btn.addEventListener('pointerenter', warmOmgithub, { passive: true });
+  const warmAll = () => { warmOmgithub(); loadCreateFx(); };
+  btn.addEventListener('pointerdown', warmAll, { passive: true });
+  btn.addEventListener('pointerenter', warmAll, { passive: true });
+  btn.addEventListener('animationend', () => btn.classList.remove('bounce'));
+  // One soft glow ring per session to hint at ＋.
+  try {
+    if (!sessionStorage.getItem('opus-feed-plus-glow')) {
+      sessionStorage.setItem('opus-feed-plus-glow', '1');
+      setTimeout(() => btn.classList.add('glow'), 2500);
+      setTimeout(() => btn.classList.remove('glow'), 2500 + 3300);
+    }
+  } catch (_) {}
   createSheetEl.querySelectorAll('[data-close-create]').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2092,14 +2137,30 @@ function wireCreateSheet() {
     // omgithub auto-start checks document.referrer's origin (page policy is
     // strict-origin-when-cross-origin, so only the origin is sent).
     e.preventDefault();
+    if (createLaunching) return;
     const url = createUrlFor(text);
     createSendEl.href = url;
-    window.open(url, '_blank', 'noopener');
-    setTimeout(() => {
+    const finish = () => {
       createPromptEl.value = '';
       syncCreateSend();
       dismissCreateSheet();
-    }, 0);
+    };
+    // Plain path: no effects (reduced motion / not loaded) or the AiGameMaker WebView
+    // (its onCreateWindow may need the gesture flag) → open synchronously.
+    if (!createFx?.motion || inAiGameMakerApp()) {
+      window.open(url, '_blank', 'noopener');
+      setTimeout(finish, 0);
+      return;
+    }
+    // Warp jump, then open while the tap's transient activation is still valid
+    // (Chrome/Firefox ~5s, Safari ~1s) so popup blocking doesn't trigger.
+    createLaunching = true;
+    createSendEl.classList.add('launching');
+    createSendEl.setAttribute('aria-label', 'Launching…');
+    createPromptEl.blur();
+    const warp = createFx.warp(text);
+    setTimeout(() => window.open(url, '_blank', 'noopener'), CREATE_WARP_OPEN_MS);
+    warp.then(() => setTimeout(finish, 120));
   });
   window.visualViewport?.addEventListener('resize', () => { if (createOpen) syncCreateKeyboard(); });
   window.visualViewport?.addEventListener('scroll', () => { if (createOpen) syncCreateKeyboard(); });

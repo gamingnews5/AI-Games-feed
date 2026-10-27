@@ -1,0 +1,163 @@
+/* Create-sheet effects (lazy). Panel goes glassy so the nebula shows through. */
+.create-sheet.fx .comments-backdrop {
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.fx-nebula {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+}
+.create-sheet.open .fx-nebula { opacity: 1; }
+.fx-nebula canvas { width: 100%; height: 100%; display: block; }
+.fx-nebula.css {
+  --fx-hue: 0deg;
+  background:
+    radial-gradient(60% 45% at 30% 30%, rgba(124, 92, 255, 0.55), transparent 70%),
+    radial-gradient(55% 40% at 75% 60%, rgba(37, 244, 238, 0.35), transparent 70%),
+    radial-gradient(50% 50% at 50% 90%, rgba(254, 44, 85, 0.35), transparent 70%),
+    #07040f;
+  background-size: 160% 160%;
+  filter: hue-rotate(var(--fx-hue));
+  transition: opacity 0.35s ease, filter 0.4s ease;
+}
+.fx-nebula.css.run { animation: fx-drift 14s ease-in-out infinite alternate; }
+.fx-nebula.css.kick { animation: fx-drift 14s ease-in-out infinite alternate, fx-kick 0.35s ease-out; }
+@keyframes fx-drift { from { background-position: 0% 0%; } to { background-position: 100% 100%; } }
+@keyframes fx-kick { 0% { transform: scale(1.03); } 100% { transform: scale(1); } }
+
+.create-sheet.fx .create-panel {
+  background: rgba(14, 12, 24, 0.72);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.create-sheet.fx:not(.fx-still) .create-panel {
+  transition: transform 0.55s cubic-bezier(0.34, 1.45, 0.5, 1);
+}
+
+.fx-prompt-wrap { position: relative; }
+.fx-prompt-wrap .create-prompt { position: relative; z-index: 1; background: rgba(255, 255, 255, 0.07); }
+.fx-ghost {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 13px 15px;
+  font-size: 16px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow: hidden;
+}
+.fx-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.15em;
+  margin-left: 1px;
+  vertical-align: -0.2em;
+  background: #b9a6ff;
+  box-shadow: 0 0 8px #7c5cff;
+  animation: fx-blink 1s steps(1) infinite;
+}
+@keyframes fx-blink { 50% { opacity: 0; } }
+
+.fx-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 0 -16px;
+  padding: 2px 16px 4px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 16px;
+}
+.fx-chips::-webkit-scrollbar { display: none; }
+.fx-chip {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 8px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.fx-chip:active { transform: scale(0.94); background: rgba(124, 92, 255, 0.35); border-color: rgba(185, 166, 255, 0.8); }
+
+/* Send: ripple + launch */
+.fx-ripple {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+  animation: fx-ripple 0.6s ease-out forwards;
+}
+@keyframes fx-ripple { to { transform: scale(18); opacity: 0; } }
+
+/* Warp */
+.create-sheet.fx-warp .create-panel {
+  transform: translateY(0) scale(0.92);
+  opacity: 0;
+  transition: transform 0.6s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.5s ease 0.15s;
+}
+.create-sheet.fx-warp .fx-nebula { opacity: 1; }
+.create-sheet.fx-warp .fx-nebula.css {
+  background:
+    repeating-conic-gradient(from 0deg at 50% 50%, rgba(255, 255, 255, 0.0) 0deg 4deg, rgba(200, 220, 255, 0.55) 4deg 5deg),
+    radial-gradient(circle at 50% 50%, #fff 0, rgba(124, 92, 255, 0.6) 20%, #07040f 70%);
+  animation: fx-hyper 0.8s cubic-bezier(0.5, 0, 0.9, 0.4) forwards;
+}
+@keyframes fx-hyper { from { transform: scale(1); } to { transform: scale(3.2); } }
+.create-sheet.fx-flash::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  background: #fff;
+  animation: fx-flash 0.45s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes fx-flash { 0% { opacity: 0.95; } 100% { opacity: 0; } }
+.fx-fly {
+  position: fixed;
+  z-index: 60;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1.4;
+  font-weight: 650;
+  text-shadow: 0 0 12px rgba(185, 166, 255, 0.9);
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow: hidden;
+  max-height: 4.2em;
+  animation: fx-fly 0.78s cubic-bezier(0.55, 0, 0.85, 0.35) forwards;
+}
+@keyframes fx-fly {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; filter: blur(0); }
+  70% { opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0.08); opacity: 0; filter: blur(2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-nebula, .fx-nebula.css, .fx-nebula.css.run { animation: none !important; transition: none !important; }
+  .create-sheet.fx .create-panel { transition: none !important; }
+  .fx-caret, .fx-ripple, .fx-fly { animation: none !important; }
+  .fx-chip { transition: none; }
+}

@@ -71,13 +71,13 @@
       <div class="comments-panel create-panel" role="dialog" aria-modal="true" aria-labelledby="createTitle">
         <div class="comments-grab" aria-hidden="true"><span class="comments-handle"></span></div>
         <header class="comments-header">
-          <h2 id="createTitle" class="comments-title">Create a game</h2>
+          <h2 id="createTitle" class="comments-title">What game should we build?</h2>
           <button type="button" class="comments-close" aria-label="Close" data-close-create>&times;</button>
         </header>
         <div class="create-body">
-          <textarea id="createPrompt" class="create-prompt" rows="4" maxlength="4000" placeholder="Describe a game to build…" aria-label="Describe a game to build" enterkeyhint="enter"></textarea>
+          <div class="fx-prompt-wrap"><textarea id="createPrompt" class="create-prompt" rows="4" maxlength="4000" placeholder="Describe a game to build…" aria-label="Describe a game to build" enterkeyhint="enter"></textarea></div>
           <div class="create-actions">
-            <a id="createSend" class="create-send" href="https://omgithub.com/" target="_blank" rel="noopener" referrerpolicy="strict-origin-when-cross-origin" aria-disabled="true">Send ↗</a>
+            <a id="createSend" class="create-send" href="https://omgithub.com/" target="_blank" rel="noopener" referrerpolicy="strict-origin-when-cross-origin" aria-disabled="true"><span class="create-send-label">Send ↗</span><span class="create-send-busy" aria-hidden="true">Launching…</span></a>
           </div>
         </div>
       </div>
