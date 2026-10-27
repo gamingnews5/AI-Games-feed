@@ -3153,11 +3153,9 @@ const likedToggleEl = document.getElementById('likedToggle');
 
 function syncLikeTotal() {
   if (!countEl) return;
-  const likes = likeCount();
   const videoCount = allGames.filter((g) => g.video).length;
   const videoLabel = `${videoCount} ${videoCount === 1 ? 'video' : 'videos'}`;
-  countEl.textContent =
-    likes > 0 ? `${catalogCount} games · ${likes}♥` : `${catalogCount} games`;
+  countEl.textContent = `${catalogCount} games`;
   countEl.title = videoLabel;
   countEl.dataset.tooltip = videoLabel;
 }

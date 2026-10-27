@@ -700,35 +700,9 @@ body {
   color: #ff3b5c;
 }
 
-/* Header heart (top-left): toggles the Liked view. Outline off, filled red on. */
-.topbar-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex: 0 1 auto;
-}
-.liked-toggle {
-  appearance: none;
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  margin-left: -6px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: transparent;
-  color: #fff;
-  cursor: pointer;
-  pointer-events: auto;
-  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.6));
-  -webkit-tap-highlight-color: transparent;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
-}
-.liked-toggle:active { transform: scale(0.9); }
+/* Header heart (top-right, after search): the single Liked toggle. Outline off, filled red on. */
+.liked-toggle { color: #fff; -webkit-tap-highlight-color: transparent; }
+.liked-toggle svg { display: block; }
 .liked-toggle .heart-fill { display: none; }
 .liked-toggle.active {
   color: #ff3b5c;
@@ -1493,3 +1467,8 @@ body.liked-view #mobileFilter { display: none; }
 }
 .create-send:active { transform: scale(0.97); }
 .create-send.disabled { opacity: 0.4; pointer-events: auto; cursor: not-allowed; }
+
+/* Header row: Top/New · Mobile · search · ♥ stay on one line; the game count sits
+   under them (out of flow) so it never pushes the heart to a second row. */
+.topbar-right { position: relative; flex-wrap: nowrap; gap: 6px; }
+.topbar-right > .meta { position: absolute; top: calc(100% + 4px); right: 0; }
