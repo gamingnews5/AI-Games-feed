@@ -2,6 +2,7 @@ import { attachCreateFx } from './create-fx.js';
 import './create-fx.css';
 import {
   fetchCatalogFeed,
+  readCachedCatalogFeed,
   REPO_RAW_BASE,
 } from './feed-from-catalog.js';
 import * as analytics from './analytics.js';
@@ -3526,17 +3527,35 @@ async function init() {
   applySiteBranding();
   syncCanonicalUrl(deepLinkIdFromUrl());
   let data;
+  // Stale-while-revalidate: start the network fetch now, render from the device copy
+  // if there is one (and it has the ?g= game), refresh silently in the background.
+  const freshP = fetchCatalogFeed();
+  freshP.catch(() => {});
+  const linkedBoot = deepLinkIdFromUrl();
+  const cached = await readCachedCatalogFeed().catch(() => null);
+  const cacheUsable = cached && (!linkedBoot || cached.feed.games?.some((g) => g?.id === linkedBoot));
+  let fromCache = false;
   try {
-    // Architecture A: live catalog from raw GitHub (public/games.json is not SoT).
-    const { feed, via } = await fetchCatalogFeed();
-    data = feed;
-    if (via.startsWith('proxy:')) {
-      console.info('[ai-games-feed] catalog loaded via Vite /catalog-proxy retry');
+    if (cacheUsable) {
+      data = cached.feed;
+      fromCache = true;
+    } else {
+      try {
+        data = (await freshP).feed;
+      } catch (err) {
+        if (!cached) throw err;
+        data = cached.feed; // offline + linked game not cached: still show the feed
+        fromCache = true;
+      }
     }
   } catch (err) {
+    finishLoadBar();
     feedEl.innerHTML = `<div class="empty">Failed to load catalog<br/><small>${escapeHtml(err.message)}</small></div>`;
     if (countEl) countEl.textContent = 'offline';
     return;
+  }
+  if (fromCache) {
+    freshP.then((fresh) => { if (fresh.sig !== cached.sig) applyFreshCatalog(fresh.feed); }).catch(() => {});
   }
 
   // Warm CDN origin used for clips + posters (media tags don't need CORS).
@@ -3551,16 +3570,9 @@ async function init() {
     }
   } catch (_) {}
 
-  const sourceCatalogCount = Number(
-    data.catalog_count ?? data.total_games ?? data.totals?.games,
-  );
-  catalogCount = Number.isFinite(sourceCatalogCount)
-    ? Math.max(0, Math.floor(sourceCatalogCount))
-    : 0;
+  catalogCount = catalogCountOf(data);
 
-  allGames = (Array.isArray(data.games) ? data.games : []).filter(
-    (g) => (g?.video || g?.slides?.length) && g?.play_url && g?.id,
-  );
+  allGames = playableGames(data);
 
   wireAudioGesture();
   wireCommentsSheet();
@@ -3592,7 +3604,72 @@ async function init() {
   if (!scrollHintWired) {
     scrollHintWired = true;
     feedEl.addEventListener('scroll', onFeedScroll, { passive: true });
-    setTimeout(hideHint, 4000);
+  }
+  requestAnimationFrame(watchFirstCardMedia);
+}
+
+function playableGames(data) {
+  return (Array.isArray(data?.games) ? data.games : []).filter(
+    (g) => (g?.video || g?.slides?.length) && g?.play_url && g?.id,
+  );
+}
+
+function catalogCountOf(data) {
+  const n = Number(data.catalog_count ?? data.total_games ?? data.totals?.games);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+}
+
+/* Fresh catalog arrived after a cached boot: swap the data in place. The cards on
+ * screen stay (no re-render, no scroll); the next sort/filter/search or the next
+ * open uses the fresh list. */
+function applyFreshCatalog(data) {
+  const games = playableGames(data);
+  if (!games.length) return;
+  allGames = games;
+  catalogCount = catalogCountOf(data);
+  syncLikeTotal();
+}
+
+/* Loading bar until the first card's poster / slide / clip frame is on screen; then
+ * the 'Swipe down' hint shows (auto-hides after 4s or on scroll). */
+let loadBarDone = false;
+function finishLoadBar() {
+  if (loadBarDone) return;
+  loadBarDone = true;
+  const bar = document.getElementById('loadbar');
+  if (!bar) return;
+  bar.classList.add('done');
+  setTimeout(() => bar.remove(), 450);
+}
+
+function revealHint() {
+  if (hintHidden || !hintEl) return;
+  hintEl.classList.remove('hide');
+  setTimeout(hideHint, 4000);
+}
+
+function watchFirstCardMedia() {
+  const card = cards()[activeIndex] || cards()[0];
+  let done = false;
+  const shown = () => {
+    if (done) return;
+    done = true;
+    finishLoadBar();
+    revealHint();
+  };
+  if (!card) { shown(); return; }
+  setTimeout(shown, 10000); // never leave the bar up forever
+  const imgs = [...card.querySelectorAll('img.poster, .slides .slide.on img.slide-img, .slides .slide:first-child img.slide-img')];
+  const video = card.querySelector('video.clip');
+  if (!imgs.length && !video) { shown(); return; }
+  for (const img of imgs) {
+    if (img.complete && img.naturalWidth && img.getAttribute('src')) { shown(); return; }
+    img.addEventListener('load', shown, { once: true });
+  }
+  if (video) {
+    if (video.readyState >= 2) { shown(); return; }
+    video.addEventListener('loadeddata', shown, { once: true });
+    video.addEventListener('playing', shown, { once: true });
   }
 }
 

@@ -24,6 +24,7 @@
       <link rel="dns-prefetch" href="https://omgithub.com" />
 </head>
   <body>
+    <div class="loadbar" id="loadbar" role="progressbar" aria-label="Loading games"><i></i></div>
     <header class="topbar">
       <span class="logo">AI Games Feed</span>
       <div class="topbar-right">
@@ -53,7 +54,7 @@
     <a class="create-game" id="createGame" href="https://omgithub.com/" target="_blank" rel="noopener" referrerpolicy="strict-origin-when-cross-origin" aria-label="Create a game" title="Create a game" aria-haspopup="dialog">
       <span class="create-game-plus" aria-hidden="true"></span>
     </a>
-    <div class="hint" id="hint">Swipe down ↓</div>
+    <div class="hint hide" id="hint">Swipe down ↓</div>
     <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
     <div id="commentsSheet" class="comments-sheet" hidden aria-hidden="true">
       <div class="comments-backdrop" data-close-comments></div>

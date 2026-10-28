@@ -443,10 +443,78 @@ export function mapCatalogToFeed(data) {
 /** Same-origin edge-cached catalog served by the Pages worker (from R2). */
 export const SAME_ORIGIN_CATALOG = '/catalog.json';
 
+/* Device copy of the last good catalog (stale-while-revalidate). Cache API first
+ * (per origin, so per host); IndexedDB where caches is missing. Stores the raw JSON. */
+const CATALOG_CACHE = 'opus-feed-catalog-v1';
+const catalogCacheKey = () => new URL(SAME_ORIGIN_CATALOG, window.location.href).href;
+
+function catalogSig(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return `${text.length}:${(h >>> 0).toString(36)}`;
+}
+
+function idb() {
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.open(CATALOG_CACHE, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('c');
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+async function idbDo(mode, fn) {
+  const db = await idb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const req = fn(db.transaction('c', mode).objectStore('c'));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function saveCatalogText(text) {
+  try {
+    if (typeof caches !== 'undefined') {
+      const c = await caches.open(CATALOG_CACHE);
+      await c.put(catalogCacheKey(), new Response(text, { headers: { 'content-type': 'application/json' } }));
+    } else if (typeof indexedDB !== 'undefined') {
+      await idbDo('readwrite', (st) => st.put(text, catalogCacheKey()));
+    }
+  } catch (_) {}
+}
+
+async function loadCatalogText() {
+  try {
+    if (typeof caches !== 'undefined') {
+      const c = await caches.open(CATALOG_CACHE);
+      const r = await c.match(catalogCacheKey());
+      return r ? await r.text() : null;
+    }
+    if (typeof indexedDB !== 'undefined') return (await idbDo('readonly', (st) => st.get(catalogCacheKey()))) || null;
+  } catch (_) {}
+  return null;
+}
+
+/** Last good catalog saved on this device, or null. */
+export async function readCachedCatalogFeed() {
+  const text = await loadCatalogText();
+  if (!text) return null;
+  try {
+    return { feed: mapCatalogToFeed(JSON.parse(text)), via: 'device-cache', sig: catalogSig(text) };
+  } catch (_) {
+    return null;
+  }
+}
+
 export async function fetchCatalogFeed() {
   // Production: the Pages worker; `vite dev` proxies /catalog.json to R2.
   const res = await fetch(SAME_ORIGIN_CATALOG, { credentials: 'same-origin' });
   if (!res.ok) throw new Error(`Catalog fetch failed (${SAME_ORIGIN_CATALOG}: HTTP ${res.status})`);
-  const data = await res.json();
-  return { feed: mapCatalogToFeed(data), via: 'edge:catalog.json' };
+  const text = await res.text();
+  const data = JSON.parse(text);
+  saveCatalogText(text);
+  return { feed: mapCatalogToFeed(data), via: 'edge:catalog.json', sig: catalogSig(text) };
 }

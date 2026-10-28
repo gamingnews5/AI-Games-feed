@@ -1519,3 +1519,43 @@ html.app-kb .create-sheet .create-panel {
      any transition list, so the app's per-frame --kb moves it 1:1. */
   translate: 0 calc(-1 * var(--kb, 0px));
 }
+
+/* First-load progress: thin top bar from first paint until the first card's media shows. */
+.loadbar {
+  position: fixed;
+  top: env(safe-area-inset-top, 0px);
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 100;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.35s ease;
+}
+.loadbar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  opacity: 0.22;
+}
+.loadbar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: loadbar-slide 1.3s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+@keyframes loadbar-slide {
+  from { transform: translateX(-60%); }
+  to { transform: translateX(250%); }
+}
+.loadbar.done { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .loadbar i { animation: none; width: 100%; opacity: 0.6; }
+  .loadbar { transition: none; }
+}
