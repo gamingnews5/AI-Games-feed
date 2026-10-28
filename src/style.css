@@ -1627,3 +1627,27 @@ html.is-admin .toast { z-index: 60; }
   padding: 0 14px;
   cursor: pointer;
 }
+
+/* Author + "Game page" credit link (only on cards with a distinct page_url). */
+.author-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.author-row > .author { min-width: 0; flex: 0 1 auto; }
+.game-page-link {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.28);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+.game-page-link:hover,
+.game-page-link:focus-visible { text-decoration: underline; text-underline-offset: 3px; }

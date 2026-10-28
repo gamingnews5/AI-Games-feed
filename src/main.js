@@ -2400,6 +2400,7 @@ const SOURCE_URL_FIELDS = [
   'x_url',
   'twitter_url',
   'url',
+  'page_url',
 ];
 
 const X_RESERVED_HANDLES = new Set([
@@ -2501,7 +2502,32 @@ function authorUrlFor(game) {
   return sourceUrls.map((value) => httpUrl(value)?.toString() || '').find(Boolean) || '';
 }
 
+/** Comparable form of a link: no hash, no trailing slash, lowercase host. */
+function linkKey(value) {
+  const u = httpUrl(value);
+  if (!u) return '';
+  u.hash = '';
+  return u.toString().replace(/\/+$/, '');
+}
+
+/** "Game page" credit link (page_url) unless it repeats Play or the author link. */
+function gamePageUrlFor(game, authorUrl) {
+  const key = linkKey(game?.page_url);
+  if (!key) return '';
+  if (key === linkKey(game.play_url) || (authorUrl && key === linkKey(authorUrl))) return '';
+  return httpUrl(game.page_url).toString();
+}
+
 function authorRowHtml(game) {
+  const row = authorRowInnerHtml(game);
+  // Dedupe against the author link only when the row (and so that link) is shown.
+  const pageUrl = gamePageUrlFor(game, row ? authorUrlFor(game) : '');
+  if (!pageUrl) return row;
+  const link = `<a class="game-page-link" href="${escapeHtml(pageUrl)}" target="_blank" rel="noopener" aria-label="Game page: ${escapeHtml(game.title || '')}">Game page ↗</a>`;
+  return `<div class="author-row">${row}${link}</div>`;
+}
+
+function authorRowInnerHtml(game) {
   const name = game.author || game.github_user || game.x_handle || '';
   if (!name) return '';
   const display = game.github_user
@@ -2941,6 +2967,26 @@ function openGame(url) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
+/** The newest catalog entry for a card's game (a stale device copy may have rendered the card). */
+function freshGame(game) {
+  const id = game?.id || game?.dataset?.id;
+  return (id && allGames.find((g) => g.id === id)) || game;
+}
+
+/**
+ * Open a game's Play target. Every game opens top-level in a new tab (no in-feed iframe
+ * or overlay exists). needs_isolation games (itch SharedArrayBuffer builds) must stay that
+ * way: window.open + noopener only. In the AiGameMaker WebView (no multi-window) this becomes a
+ * main-frame navigation the app intercepts and hands to a Chrome Custom Tab.
+ */
+function openPlay(game, url) {
+  if (game?.needs_isolation) {
+    window.open(url, '_blank', 'noopener');
+    return;
+  }
+  openGame(url);
+}
+
 /**
  * Short tap on the active card's video opens Play. Long-press toggles fit mode.
  * Chrome often fires pointercancel on video long-press (context-menu gesture) —
@@ -3085,6 +3131,7 @@ function wireActiveVideoTap(card, game) {
 }
 
 function playGame(gameOrUrl) {
+  if (typeof gameOrUrl === 'object' && gameOrUrl) gameOrUrl = freshGame(gameOrUrl);
   const url =
     typeof gameOrUrl === 'string'
       ? gameOrUrl
@@ -3096,7 +3143,7 @@ function playGame(gameOrUrl) {
   autoAdvancePaused = true;
   watchAccumSec = 0;
   pauseActiveMedia();
-  openGame(url);
+  openPlay(typeof gameOrUrl === 'object' ? gameOrUrl : null, url);
 }
 
 function wireDownloadButton(btn, game) {
@@ -3145,13 +3192,14 @@ function wirePlayButton(btn, game) {
   btn.addEventListener('pointerup', () => {
     btn.classList.remove('held');
     if (!held) return;
-    const url = game?.play_url;
+    const g = freshGame(game);
+    const url = g?.play_url;
     if (!url) return;
-    analytics.track('play_tab', { game_id: game.id });
+    analytics.track('play_tab', { game_id: g.id });
     autoAdvancePaused = true;
     watchAccumSec = 0;
     pauseActiveMedia();
-    openGame(url);
+    openPlay(g, url);
   });
   btn.addEventListener('pointermove', (e) => {
     if (Math.abs(e.clientX - sx) > 14 || Math.abs(e.clientY - sy) > 14) clear();
@@ -3220,9 +3268,12 @@ function wireKeyboard() {
       scrollToIndex(currentIndexFromScroll() - 1);
       hideHint();
     } else if (e.key === 'Enter') {
+      // A focused button/link handles its own Enter (Play would open twice).
+      if (e.target?.closest?.('button, a[href], input, textarea, select')) return;
       const card = cards()[currentIndexFromScroll()];
       if (card?.dataset.url) {
         playGame({
+          id: card.dataset.id,
           play_url: card.dataset.url,
           iframe: card.dataset.iframe === 'true' ? true : card.dataset.iframe === 'false' ? false : null,
           title: card.querySelector('.title')?.textContent || 'Play game',
@@ -3719,6 +3770,14 @@ function applyFreshCatalog(data) {
   allGames = games;
   catalogCount = catalogCountOf(data);
   syncLikeTotal();
+  // Cards drawn from the device copy: refresh their Play target / iframe flag in place.
+  for (const card of cards()) {
+    const g = games.find((x) => x.id === card.dataset.id);
+    if (!g) continue;
+    if (g.play_url && card.dataset.url !== g.play_url) card.dataset.url = g.play_url;
+    if (typeof g.iframe === 'boolean') card.dataset.iframe = String(g.iframe);
+    else delete card.dataset.iframe;
+  }
 }
 
 /* ---- Admin: overrides for everyone, ✎ edit sheet for admins ---- */

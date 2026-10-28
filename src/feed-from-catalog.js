@@ -415,6 +415,10 @@ export function mapCatalogToFeed(data) {
     if (x_handle) entry.x_handle = x_handle;
     if (avatar_url) entry.avatar_url = avatar_url;
     if (typeof g.iframe === 'boolean') entry.iframe = g.iframe;
+    // itch SharedArrayBuffer games: top-level tab only, never framed.
+    if (g.needs_isolation === true) entry.needs_isolation = true;
+    // Original wrapper / landing page (credit link "Game page"); play_url is the playable game itself.
+    if (typeof g.page_url === 'string' && /^https?:\/\//.test(g.page_url.trim())) entry.page_url = g.page_url.trim();
     // Native (non-browser) games: Download replaces Play.
     if (g.browser_playable === false) entry.browser_playable = false;
     if (g.requires_own_files === true) entry.requires_own_files = true;
