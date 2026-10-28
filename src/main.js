@@ -2220,9 +2220,36 @@ function wireCreateSheet() {
       syncCreateSend();
       dismissCreateSheet();
     };
-    // Plain path: no effects (reduced motion / not loaded) or the AiGameMaker WebView
-    // (its onCreateWindow may need the gesture flag) → open synchronously.
-    if (!createFx?.motion || inAiGameMakerApp()) {
+    // AiGameMaker WebView: no multi-window, so window.open just navigates this same
+    // WebView, and the history.back() of dismissCreateSheet() then cancelled it. Pop the
+    // sheet's 'create' entry first, then navigate in place once we're back on the feed
+    // entry (so Back from omgithub lands on the feed, sheet closed, same game).
+    // location.assign sends the feed origin as referrer, like window.open did.
+    if (inAiGameMakerApp()) {
+      createPromptEl.value = '';
+      syncCreateSend();
+      const hadEntry = history.state?.opus === 'create';
+      closeCreateSheet();
+      let gone = false;
+      const go = () => {
+        if (gone) return;
+        gone = true;
+        window.removeEventListener('popstate', go);
+        window.location.assign(url);
+      };
+      if (!hadEntry) { go(); return; }
+      window.addEventListener('popstate', go);
+      // Fallback if popstate never comes: neutralize the entry and go anyway.
+      setTimeout(() => {
+        if (gone) return;
+        try { history.replaceState({ g: currentGameId() }, '', window.location.href); } catch (_) {}
+        go();
+      }, 400);
+      history.back();
+      return;
+    }
+    // Plain path: no effects (reduced motion / not loaded) → open synchronously.
+    if (!createFx?.motion) {
       window.open(url, '_blank', 'noopener');
       setTimeout(finish, 0);
       return;
