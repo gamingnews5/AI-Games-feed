@@ -45,22 +45,33 @@ export async function fetchIsAdmin() {
   }
 }
 
+/** Chip slug: lowercase, spaces/underscores → '-', keeps dots ('opus-5.5'). */
 export function normalizeAdminTag(raw) {
   const v = String(raw || '')
     .toLowerCase()
     .trim()
-    .replace(/[\s_.]+/g, '-')
-    .replace(/[^a-z0-9-]/g, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-z0-9.-]/g, '')
     .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return /^[a-z0-9][a-z0-9-]{0,31}$/.test(v) ? v : '';
+    .replace(/^[-.]+|[-.]+$/g, '');
+  return /^[a-z0-9][a-z0-9.-]{0,31}$/.test(v) ? v : '';
 }
+
+/** The feed maps server names back to its chip slugs (e.g. 'opus 5.5' → 'opus-5.5', 'three.js' → 'three-js'). */
+let canonTag = normalizeAdminTag;
+export function setTagCanon(fn) {
+  if (typeof fn === 'function') canonTag = fn;
+}
+export const MAX_TAGS = 12;
+/** Tag overrides saved before this were catalog-tags-only (platform / model / engine chips
+ *  stayed derived). From then on an override is the card's full chip list. */
+export const LEGACY_TAGS_BEFORE = Date.parse('2026-10-28T10:29:00Z');
 
 function cleanTags(raw) {
   if (!Array.isArray(raw)) return null;
   const out = [];
   for (const t of raw) {
-    const v = normalizeAdminTag(t);
+    const v = canonTag(t);
     if (v && !out.includes(v)) out.push(v);
   }
   return out.length ? out : null;
@@ -75,6 +86,7 @@ function cleanRating(raw) {
 function cleanEntry(o) {
   if (!o || typeof o !== 'object') return null;
   const e = { admin_rating: cleanRating(o.admin_rating), tags: cleanTags(o.tags), updated_at: o.updated_at || null };
+  if (e.tags && e.updated_at && Date.parse(e.updated_at) < LEGACY_TAGS_BEFORE) e.legacy = true;
   return e.admin_rating == null && !e.tags ? null : e;
 }
 
@@ -168,18 +180,26 @@ function baseOf(g) {
   return g.__adminBase;
 }
 
-function setFields(g, rating, tags) {
+/** g.admin_tags = the card's full chip list (override); absent = chips derived from the catalog.
+ *  A legacy override only replaces the catalog tags (g.tags). */
+function setFields(g, rating, tags, legacyTags = null) {
+  const base = baseOf(g);
   if (rating == null) delete g.admin_rating;
   else g.admin_rating = rating;
-  if (tags && tags.length) g.tags = tags.slice();
+  const catTags = legacyTags || base.tags;
+  if (catTags && catTags.length) g.tags = catTags.slice();
   else delete g.tags;
+  if (Array.isArray(tags)) g.admin_tags = tags.slice();
+  else delete g.admin_tags;
 }
 
 /** Server entry (or null) on top of the catalog values. */
 function fieldsFrom(g, o) {
   const base = baseOf(g);
-  return { admin_rating: o?.admin_rating ?? base.admin_rating, tags: o?.tags || base.tags || [] };
+  const legacy = !!(o?.legacy && o.tags);
+  return { admin_rating: o?.admin_rating ?? base.admin_rating, tags: legacy ? null : o?.tags || null, legacyTags: legacy ? o.tags : null };
 }
+const state = (g) => JSON.stringify([g.admin_rating ?? null, g.tags || null, g.admin_tags || null]);
 
 /**
  * Apply overrides (default: the latest server map) on top of catalog games, in place.
@@ -196,9 +216,9 @@ export function applyOverrides(games, overrides) {
     const e = local.size ? liveLocal(g.id, o) : null;
     if (!o && !e && !g.__adminBase) continue;
     const f = e ? e.fields : fieldsFrom(g, o);
-    const before = JSON.stringify([g.admin_rating ?? null, g.tags || null]);
-    setFields(g, f.admin_rating, f.tags);
-    if (JSON.stringify([g.admin_rating ?? null, g.tags || null]) !== before) changed.push(g.id);
+    const before = state(g);
+    setFields(g, f.admin_rating, f.tags, f.legacyTags);
+    if (state(g) !== before) changed.push(g.id);
   }
   return changed;
 }
@@ -207,10 +227,16 @@ export function applyOverrides(games, overrides) {
 export function setGameFields(g, fields) {
   baseOf(g);
   const e = local.get(g.id) || { confirmed: null, serverAt: null, inflight: 0 };
-  e.fields = { admin_rating: fields.admin_rating ?? null, tags: (fields.tags || []).slice() };
+  const full = Array.isArray(fields.tags);
+  e.fields = {
+    admin_rating: fields.admin_rating ?? null,
+    tags: full ? fields.tags.slice() : null,
+    // No chip list given (rating-only edit): keep whatever catalog/legacy tags show now.
+    legacyTags: full ? null : g.tags ? g.tags.slice() : null,
+  };
   e.at = Date.now();
   local.set(g.id, e);
-  setFields(g, e.fields.admin_rating, e.fields.tags);
+  setFields(g, e.fields.admin_rating, e.fields.tags, e.fields.legacyTags);
 }
 
 const ERROR_TOASTS = { 401: 'Sign in to omgithub', 403: 'Not allowed', 503: 'Edits paused' };
@@ -263,7 +289,7 @@ export async function saveGamePatch(g, patch) {
     e.at = Date.now();
     if (e.inflight === 0) {
       e.fields = saved;
-      setFields(g, saved.admin_rating, saved.tags);
+      setFields(g, saved.admin_rating, saved.tags, saved.legacyTags);
     }
     persistLocal();
   }
@@ -323,14 +349,15 @@ function ensureSheet() {
     const b = e.target.closest('[data-tag]');
     if (!b || !sheetState) return;
     const t = b.dataset.tag;
-    const cur = Array.isArray(sheetState.game.tags) ? sheetState.game.tags : [];
+    const cur = sheetState.tagsOf(sheetState.game);
+    touchRecentTag(t);
     sheetState.onChange({ tags: cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t] });
   });
   sheetEl.querySelector('.admin-add').addEventListener('submit', (e) => {
     e.preventDefault();
     if (!sheetState) return;
     const input = sheetEl.querySelector('.admin-add-input');
-    const t = normalizeAdminTag(input.value);
+    const t = canonTag(input.value);
     if (!t) {
       input.classList.remove('bad');
       void input.offsetWidth;
@@ -338,8 +365,10 @@ function ensureSheet() {
       return;
     }
     input.value = '';
-    if (!sheetState.allTags.includes(t)) sheetState.allTags.unshift(t);
-    const cur = Array.isArray(sheetState.game.tags) ? sheetState.game.tags : [];
+    touchRecentTag(t);
+    // New tag goes right after Mobile; the rest keep their places while the sheet is open.
+    if (!sheetState.order.includes(t)) sheetState.order.splice(1, 0, t);
+    const cur = sheetState.tagsOf(sheetState.game);
     if (!cur.includes(t)) sheetState.onChange({ tags: [...cur, t] });
     else renderAdminSheet();
   });
@@ -350,6 +379,32 @@ function ensureSheet() {
     }
   });
   return sheetEl;
+}
+
+/* Recently touched tags (toggled or added on any game), newest first. */
+export const RECENT_TAGS_KEY = 'opus-feed-admin-recent-tags';
+const RECENT_MAX = 12;
+export function recentTags() {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_TAGS_KEY) || '[]');
+    return Array.isArray(v) ? v.filter((t) => typeof t === 'string' && t).slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+function touchRecentTag(t) {
+  try {
+    localStorage.setItem(RECENT_TAGS_KEY, JSON.stringify([t, ...recentTags().filter((x) => x !== t)].slice(0, RECENT_MAX)));
+  } catch {}
+}
+/** Mobile first always, then recent tags, then the card's other chips, then the rest. */
+function sheetOrder(tags, allTags) {
+  const out = ['mobile'];
+  const add = (t) => t && !out.includes(t) && out.push(t);
+  recentTags().forEach(add);
+  tags.forEach(add);
+  allTags.forEach(add);
+  return out;
 }
 
 export function isAdminSheetOpen() {
@@ -368,8 +423,10 @@ export function renderAdminSheet() {
     const hint = cur == null && fallback === n;
     return `<button type="button" class="admin-chip${on ? ' on' : ''}${hint ? ' admin-hint' : ''}" data-rating="${n}" aria-pressed="${on}">${n}</button>`;
   }).join('');
-  const tags = Array.isArray(game.tags) ? game.tags : [];
-  const order = [...tags, ...allTags.filter((t) => !tags.includes(t))];
+  const tags = sheetState.tagsOf(game);
+  // Order is fixed when the sheet opens (no jumping under the finger).
+  const order = sheetState.order || (sheetState.order = sheetOrder(tags, allTags));
+  for (const t of tags) if (!order.includes(t)) order.push(t);
   sheetEl.querySelector('.admin-tags').innerHTML = order
     .map((t) => {
       const on = tags.includes(t);
@@ -378,7 +435,7 @@ export function renderAdminSheet() {
     .join('');
 }
 
-/** opts: { game, allTags, label(tag), onChange(patch), onDismiss() } */
+/** opts: { game, allTags, label(tag), tagsOf(game) → card chip slugs, onChange(patch), onDismiss() } */
 export function openAdminSheet(opts) {
   const el = ensureSheet();
   sheetState = { ...opts, allTags: opts.allTags.slice() };

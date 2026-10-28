@@ -502,7 +502,7 @@ function sortGames(games, mode) {
 /** Active tag filter (?tag=<tag>); empty string = no tag filter. */
 function normalizeTag(raw) {
   const v = String(raw || '').toLowerCase().trim();
-  return /^[a-z0-9][a-z0-9-]{0,31}$/.test(v) ? v : '';
+  return /^[a-z0-9][a-z0-9.-]{0,31}$/.test(v) ? v : '';
 }
 
 function tagFromUrl() {
@@ -568,6 +568,8 @@ function searchFields(g) {
 
 /** Tags a card can be filtered by: catalog tags plus the engine name. */
 function gameTags(g) {
+  // Admin chip override: the card's chips are exactly the list, and so is the filter.
+  if (Array.isArray(g.admin_tags)) return g.admin_tags.slice();
   const out = Array.isArray(g.tags) ? g.tags.slice() : [];
   const eng = normalizeTag(String(g.engine || '').replace(/[\s.]+/g, '-'));
   if (eng && !out.includes(eng)) out.push(eng);
@@ -618,8 +620,10 @@ function filterGames(games, mobileOnly) {
   let list = games;
   if (activeTag) list = list.filter((g) => gameTags(g).includes(activeTag));
   if (!mobileOnly) return list;
-  return list.filter(
-    (g) => Array.isArray(g.platforms) && g.platforms.includes('mobile'),
+  return list.filter((g) =>
+    Array.isArray(g.admin_tags)
+      ? g.admin_tags.includes('mobile')
+      : Array.isArray(g.platforms) && g.platforms.includes('mobile'),
   );
 }
 
@@ -2636,7 +2640,68 @@ function loadSlidesHtml(game) {
 }
 
 /** Score + platform / made-with / engine / tag chips (rebuilt in place by refreshCardMeta). */
+/** Engine name → chip slug ('Three.js' → 'three-js'); display names learned from the catalog. */
+const engineLabels = new Map();
+function engineSlug(engine) {
+  return String(engine || '')
+    .toLowerCase()
+    .replace(/[\s.]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32);
+}
+function learnEngineLabels(games) {
+  for (const g of games) {
+    const slug = engineSlug(g.engine);
+    if (slug && !engineLabels.has(slug)) engineLabels.set(slug, String(g.engine));
+  }
+}
+/** Chip label for a slug, incl. derived ones (mobile → Mobile, opus-5.5 → Opus 5.5, godot → Godot). */
+function chipLabel(slug) {
+  return engineLabels.get(slug) || tagLabel(slug);
+}
+/** Server / typed name → the feed's chip slug ('Opus 5.5' → 'opus-5.5', 'three.js' → 'three-js'). */
+function canonChipTag(raw) {
+  const v = admin.normalizeAdminTag(raw);
+  if (!v) return '';
+  if (v === 'desktop') return 'pc';
+  if (v === 'touch' || v === 'phone') return 'mobile';
+  if (engineLabels.has(v) || MADE_LABELS[v]) return v;
+  const dashed = v.replace(/\./g, '-').replace(/-+/g, '-');
+  if (engineLabels.has(dashed) || MADE_LABELS[dashed]) return dashed;
+  const dotted = v.replace(/-(\d)/g, '.$1');
+  if (MADE_LABELS[dotted]) return dotted; // 'opus-5-5' → 'opus-5.5'
+  return v;
+}
+admin.setTagCanon(canonChipTag);
+/** Slugs of the chips the card shows (rating excluded), in card order. */
+function chipTags(game) {
+  if (Array.isArray(game.admin_tags)) return game.admin_tags.slice();
+  const out = [];
+  const add = (t) => t && !out.includes(t) && out.push(t);
+  platformTags(game.platforms).forEach(add);
+  if (MADE_LABELS[String(game.made_with || '').toLowerCase()]) add(madeWithTag(game.made_with));
+  if (game.engine) add(engineSlug(game.engine));
+  (Array.isArray(game.tags) ? game.tags : []).forEach(add);
+  return out;
+}
+function overrideChipsHtml(game) {
+  return game.admin_tags
+    .map((t) => {
+      const cls = t === 'mobile' || t === 'pc' ? 'platform' : MADE_LABELS[t] ? 'made-with' : engineLabels.has(t) ? 'engine' : '';
+      return chipHtml(t, chipLabel(t), cls);
+    })
+    .join('');
+}
+
 function badgesHtml(game) {
+  if (Array.isArray(game.admin_tags)) {
+    return `
+        <span class="score">${escapeHtml(scoreLabel(game.admin_rating ?? game.screenshot_score))}</span>
+        ${overrideChipsHtml(game)}
+      `;
+  }
   const platHtml = platformTags(game.platforms)
     .map((t) => chipHtml(t, tagLabel(t), 'platform'))
     .join('');
@@ -3592,6 +3657,7 @@ async function init() {
   catalogCount = catalogCountOf(data);
 
   allGames = playableGames(data);
+  learnEngineLabels(allGames);
   // Admin overrides (rating/tags) from the device copy apply before the first render.
   admin.applyOverrides(allGames, admin.readCachedOverrides());
 
@@ -3648,6 +3714,7 @@ function catalogCountOf(data) {
 function applyFreshCatalog(data) {
   const games = playableGames(data);
   if (!games.length) return;
+  learnEngineLabels(games);
   admin.applyOverrides(games);
   allGames = games;
   catalogCount = catalogCountOf(data);
@@ -3663,7 +3730,12 @@ function startAdminBoot() {
   admin.fetchOverrides().then((map) => {
     if (!map) return;
     // Patch cards in place (no re-sort, no scroll): the current card never jumps.
-    admin.applyOverrides(allGames, map).forEach(refreshCardMeta);
+    const changed = admin.applyOverrides(allGames, map);
+    changed.forEach(refreshCardMeta);
+    // A filter that matched nothing before the overrides (e.g. ?tag= of an admin-only tag): render now.
+    if (changed.length && !cards().length && (activeTag || readMobileOnly())) {
+      renderFeed(readSortMode(), readMobileOnly(), { restore: false, landId: deepLinkIdFromUrl() });
+    }
   });
   admin.fetchIsAdmin().then((yes) => {
     if (!yes) return;
@@ -3697,12 +3769,12 @@ function addAdminButton(card) {
 
 function adminAllTags() {
   const freq = new Map();
-  for (const g of allGames) for (const t of Array.isArray(g.tags) ? g.tags : []) freq.set(t, (freq.get(t) || 0) + 1);
+  for (const g of allGames) for (const t of chipTags(g)) freq.set(t, (freq.get(t) || 0) + 1);
   return [...freq.keys()].sort((a, b) => freq.get(b) - freq.get(a) || a.localeCompare(b));
 }
 
 function adminSnapshot(game) {
-  return { admin_rating: game.admin_rating ?? null, tags: Array.isArray(game.tags) ? game.tags.slice() : [] };
+  return { admin_rating: game.admin_rating ?? null, tags: Array.isArray(game.admin_tags) ? game.admin_tags.slice() : null };
 }
 
 function openAdminEdit(id) {
@@ -3714,7 +3786,8 @@ function openAdminEdit(id) {
   admin.openAdminSheet({
     game,
     allTags: adminAllTags(),
-    label: tagLabel,
+    label: chipLabel,
+    tagsOf: chipTags,
     onChange: (patch) => adminEdit(game, patch),
     onDismiss: dismissAdminEdit,
   });
@@ -3737,7 +3810,18 @@ function dismissAdminEdit() {
 }
 
 /** Optimistic edit: card + in-memory game now; saves run in order; a failure reverts. */
+/** Override chips in card order: Mobile, PC, model, engine, then the rest as listed. */
+function chipRank(t) {
+  return t === 'mobile' ? 0 : t === 'pc' ? 1 : MADE_LABELS[t] ? 2 : engineLabels.has(t) ? 3 : 4;
+}
 function adminEdit(game, patch) {
+  if (Array.isArray(patch.tags)) {
+    patch = { ...patch, tags: patch.tags.map((t, i) => [chipRank(t), i, t]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]) };
+  }
+  if (Array.isArray(patch.tags) && patch.tags.length > admin.MAX_TAGS) {
+    showToast(`Max ${admin.MAX_TAGS} tags`);
+    return;
+  }
   admin.setGameFields(game, { ...adminSnapshot(game), ...patch });
   refreshCardMeta(game.id);
   admin.renderAdminSheet();
