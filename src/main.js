@@ -681,13 +681,12 @@ function syncUrlForGame(id) {
   if (!id || restoring || historySilent) return;
   const next = historyUrlFor(id);
   try {
-    // Landing card replaces the entry so the first back still leaves the site.
-    // Later cards push, so back returns to the previous game.
-    if (!feedHistorySeeded) {
-      history.replaceState({ g: id }, '', next);
+    // Card changes never push: Back skips previous games (it closes overlays, undoes
+    // filter toggles, else leaves the page). Replace keeps ?g= current for share and
+    // reload, and keeps whatever entry is on top (overlay/filter) as it is.
+    if (!feedHistorySeeded || next !== window.location.href) {
+      history.replaceState({ ...(history.state || {}), g: id }, '', next);
       feedHistorySeeded = true;
-    } else if (next !== window.location.href) {
-      history.pushState({ g: id }, '', next);
     }
   } catch (_) {
     // Cross-origin history changes are not allowed; sharing still uses next.
@@ -703,23 +702,7 @@ function pushOverlayHistory(kind) {
   } catch (_) {}
 }
 
-function goToGameFromHistory(id) {
-  if (!id) return;
-  const list = cards();
-  let index = -1;
-  list.forEach((card, i) => {
-    if (index < 0 && card.dataset.id === id) index = i;
-  });
-  if (index < 0 || index === activeIndex) return;
-  historySilent = true;
-  try {
-    scrollToIndex(index, { smooth: false });
-  } finally {
-    historySilent = false;
-  }
-}
-
-/** Back closes the top layer: play, then comments, then the previous game. */
+/** Back closes the top layer (comments/create) or undoes a filter toggle; card changes add no entries. */
 function onHistoryPop() {
   const state = history.state || {};
   if (commentsOpen && state.opus !== 'comments') {
@@ -753,7 +736,9 @@ function onHistoryPop() {
     applyTagFilter(urlTag, { fromHistory: true, landId: state.g || deepLinkIdFromUrl() });
     return;
   }
-  goToGameFromHistory(state.g || deepLinkIdFromUrl());
+  // Plain entry (an overlay was popped): stay on the current game and refresh this
+  // entry's ?g= (it may be stale if cards changed while the overlay was open).
+  syncUrlForGame(currentGameId());
 }
 
 function dismissCommentsSheet() {
