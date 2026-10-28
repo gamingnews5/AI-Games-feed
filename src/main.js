@@ -3648,7 +3648,7 @@ function catalogCountOf(data) {
 function applyFreshCatalog(data) {
   const games = playableGames(data);
   if (!games.length) return;
-  admin.applyOverrides(games, latestOverrides || admin.readCachedOverrides());
+  admin.applyOverrides(games);
   allGames = games;
   catalogCount = catalogCountOf(data);
   syncLikeTotal();
@@ -3657,15 +3657,11 @@ function applyFreshCatalog(data) {
 /* ---- Admin: overrides for everyone, ✎ edit sheet for admins ---- */
 let isAdmin = false;
 let adminOpen = false;
-let latestOverrides = null;
-/** Last server-acknowledged {admin_rating, tags} per game (revert target on a failed save). */
-const adminConfirmed = new Map();
 const adminChains = new Map();
 
 function startAdminBoot() {
   admin.fetchOverrides().then((map) => {
     if (!map) return;
-    latestOverrides = map;
     // Patch cards in place (no re-sort, no scroll): the current card never jumps.
     admin.applyOverrides(allGames, map).forEach(refreshCardMeta);
   });
@@ -3742,25 +3738,22 @@ function dismissAdminEdit() {
 
 /** Optimistic edit: card + in-memory game now; saves run in order; a failure reverts. */
 function adminEdit(game, patch) {
-  if (!adminConfirmed.has(game.id)) adminConfirmed.set(game.id, adminSnapshot(game));
   admin.setGameFields(game, { ...adminSnapshot(game), ...patch });
   refreshCardMeta(game.id);
   admin.renderAdminSheet();
+  const redraw = () => {
+    // A catalog refresh may have swapped in a new object for this game since the edit.
+    const cur = allGames.find((g) => g.id === game.id);
+    if (cur && cur !== game) admin.applyOverrides([cur]);
+    refreshCardMeta(game.id);
+    if (admin.adminSheetGameId() === game.id) admin.renderAdminSheet();
+  };
   const prev = adminChains.get(game.id) || Promise.resolve();
   const run = prev.then(() =>
-    admin.saveGamePatch(game.id, patch).then(
-      () => {
-        const ok = { ...adminConfirmed.get(game.id), ...patch };
-        adminConfirmed.set(game.id, ok);
-      },
-      () => {
-        const back = adminConfirmed.get(game.id);
-        admin.setGameFields(game, back);
-        refreshCardMeta(game.id);
-        if (admin.adminSheetGameId() === game.id) admin.renderAdminSheet();
-        showToast("Couldn't save — reverted");
-      },
-    ),
+    admin.saveGamePatch(game, patch).then((res) => {
+      redraw();
+      if (!res.ok) showToast(admin.saveErrorToast(res.status));
+    }),
   );
   adminChains.set(game.id, run);
 }

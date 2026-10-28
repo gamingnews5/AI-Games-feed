@@ -8,17 +8,21 @@
 
 
 export const ME_URL = 'https://omgithub.com/api/me';
-// TODO(@omgithub): endpoints not final. Placeholders; a 404 / CORS failure is a no-op
-// (overrides) or a revert + toast (saves).
-// Expected GET response: { overrides: { [game_id]: { admin_rating?: 1..10|null, tags?: string[] } } }
-// (a bare { [game_id]: {...} } map is accepted too).
+// Live (omsite 1e47f82). GET is public (credentials omitted, so lolgames.net's
+// `Access-Control-Allow-Origin: *` works too); POST needs the omgithub session.
+// GET  → { generated_at, overrides: { [game_id]: { admin_rating: 1..10|null, tags: string[]|null, updated_at } }, projects }
+// POST { game_id, admin_rating } and/or { game_id, tags } → 200 { ok, game_id, override|null }
+//      errors { error }: 401 / 403 / 400 / 415 / 503
 export const OVERRIDES_URL = 'https://omgithub.com/api/feed/overrides';
-// TODO(@omgithub): save body shape. Sent as POST JSON, credentials: 'include'.
-export const SAVE_URL = 'https://omgithub.com/api/feed/overrides';
-export const saveBody = (gameId, patch) => ({ game_id: gameId, ...patch }); // patch: {admin_rating} | {tags}
+export const SAVE_URL = OVERRIDES_URL;
+export const saveBody = (gameId, patch) => ({ game_id: gameId, ...patch });
 
-const OVERRIDES_CACHE_KEY = 'opus-admin-overrides-v1';
+const OVERRIDES_CACHE_KEY = 'opus-admin-overrides-v2';
+const LOCAL_KEY = 'opus-admin-local-v1';
 const FETCH_TIMEOUT_MS = 8000;
+/** GET is max-age=30 + a 10s server cache: a just-saved value wins over the GET for this long
+ *  unless the GET already carries that save (its updated_at ≥ the save's updated_at). */
+export const LOCAL_WIN_MS = 45000;
 
 function timeoutSignal(ms) {
   try {
@@ -59,61 +63,101 @@ function cleanTags(raw) {
     const v = normalizeAdminTag(t);
     if (v && !out.includes(v)) out.push(v);
   }
-  return out;
+  return out.length ? out : null;
 }
 
 function cleanRating(raw) {
-  if (raw === null) return null;
   const n = Number(raw);
-  return Number.isInteger(n) && n >= 1 && n <= 10 ? n : undefined;
+  return raw != null && Number.isInteger(n) && n >= 1 && n <= 10 ? n : null;
 }
 
-/** { game_id: { admin_rating, tags } } from either response shape; null if unusable. */
+/** One override entry → { admin_rating|null, tags|null, updated_at } or null if it overrides nothing. */
+function cleanEntry(o) {
+  if (!o || typeof o !== 'object') return null;
+  const e = { admin_rating: cleanRating(o.admin_rating), tags: cleanTags(o.tags), updated_at: o.updated_at || null };
+  return e.admin_rating == null && !e.tags ? null : e;
+}
+
+/** { game_id: entry } from the GET response (or a bare map); null if unusable. */
 export function parseOverrides(data) {
   const map = data && typeof data === 'object' ? (data.overrides && typeof data.overrides === 'object' ? data.overrides : data) : null;
   if (!map || Array.isArray(map)) return null;
   const out = {};
   for (const [id, o] of Object.entries(map)) {
-    if (!id || !o || typeof o !== 'object') continue;
-    const e = {};
-    const r = cleanRating(o.admin_rating);
-    if (r !== undefined) e.admin_rating = r;
-    const t = cleanTags(o.tags);
-    if (t) e.tags = t;
-    if (Object.keys(e).length) out[id] = e;
+    const e = id ? cleanEntry(o) : null;
+    if (e) out[id] = e;
   }
   return out;
 }
 
-export function readCachedOverrides() {
+let serverMap = null; // latest known server overrides (fresh GET, else device cache)
+
+function readJSON(key) {
   try {
-    return parseOverrides(JSON.parse(localStorage.getItem(OVERRIDES_CACHE_KEY) || 'null'));
+    return JSON.parse(localStorage.getItem(key) || 'null');
   } catch (_) {
     return null;
   }
 }
-
-function writeCachedOverrides(map) {
+function writeJSON(key, v) {
   try {
-    localStorage.setItem(OVERRIDES_CACHE_KEY, JSON.stringify(map));
+    localStorage.setItem(key, JSON.stringify(v));
   } catch (_) {}
+}
+
+export function readCachedOverrides() {
+  if (!serverMap) serverMap = parseOverrides(readJSON(OVERRIDES_CACHE_KEY));
+  return serverMap;
 }
 
 /** Fresh overrides (cached on success) or null on any failure. */
 export async function fetchOverrides() {
-  if (!OVERRIDES_URL) return null;
   try {
-    const r = await fetch(OVERRIDES_URL, { credentials: 'include', cache: 'no-store', signal: timeoutSignal(FETCH_TIMEOUT_MS) });
+    const r = await fetch(OVERRIDES_URL, { credentials: 'omit', cache: 'no-store', signal: timeoutSignal(FETCH_TIMEOUT_MS) });
     if (!r.ok) return null;
     const map = parseOverrides(await r.json());
-    if (map) writeCachedOverrides(map);
+    if (!map) return null;
+    serverMap = map;
+    writeJSON(OVERRIDES_CACHE_KEY, map);
     return map;
   } catch (_) {
     return null;
   }
 }
 
-/** Remember the catalog values once so a later overrides map can drop an override. */
+/* ---- Local edits that beat a stale GET ----
+ * id → { fields: {admin_rating, tags}, confirmed: fields|null, serverAt: iso|null, at: ms, inflight: n } */
+const local = new Map();
+(function loadLocal() {
+  const saved = readJSON(LOCAL_KEY);
+  if (!saved || typeof saved !== 'object') return;
+  for (const [id, e] of Object.entries(saved)) {
+    if (e && e.fields && Date.now() - e.at < LOCAL_WIN_MS) local.set(id, { fields: e.fields, confirmed: e.fields, serverAt: e.serverAt || null, at: e.at, inflight: 0 });
+  }
+})();
+function persistLocal() {
+  const out = {};
+  for (const [id, e] of local) if (e.confirmed) out[id] = { fields: e.confirmed, serverAt: e.serverAt, at: e.at };
+  writeJSON(LOCAL_KEY, out);
+}
+
+/** Local entry still wins over the server entry `o`? Drops it once it no longer does. */
+function liveLocal(id, o) {
+  const e = local.get(id);
+  if (!e) return null;
+  if (e.inflight > 0) return e;
+  if (Date.now() - e.at >= LOCAL_WIN_MS) {
+    local.delete(id);
+    persistLocal();
+    return null;
+  }
+  // The server map already carries this save (or something newer): use it. The entry
+  // stays for the window so a later, staler GET still can't roll the value back.
+  const caughtUp = e.serverAt && o?.updated_at && Date.parse(o.updated_at) >= Date.parse(e.serverAt);
+  return caughtUp ? null : e;
+}
+
+/** Remember the catalog values once so a dropped override goes back to them. */
 function baseOf(g) {
   if (!g.__adminBase) {
     g.__adminBase = {
@@ -131,49 +175,99 @@ function setFields(g, rating, tags) {
   else delete g.tags;
 }
 
+/** Server entry (or null) on top of the catalog values. */
+function fieldsFrom(g, o) {
+  const base = baseOf(g);
+  return { admin_rating: o?.admin_rating ?? base.admin_rating, tags: o?.tags || base.tags || [] };
+}
+
 /**
- * Apply { game_id: { admin_rating, tags } } on top of catalog games (in place).
- * Games overridden before but missing from `overrides` go back to catalog values.
- * Returns the ids whose rating/tags changed.
+ * Apply overrides (default: the latest server map) on top of catalog games, in place.
+ * A fresh local edit beats the server map. Games overridden before but missing now go
+ * back to catalog values. Returns the ids whose rating/tags changed.
  */
 export function applyOverrides(games, overrides) {
   const changed = [];
-  if (!Array.isArray(games) || !overrides) return changed;
+  const map = overrides || serverMap || {};
+  if (!Array.isArray(games)) return changed;
   for (const g of games) {
     if (!g?.id) continue;
-    const o = overrides[g.id];
-    if (!o && !g.__adminBase) continue;
-    const base = baseOf(g);
-    const rating = o && 'admin_rating' in o ? o.admin_rating : base.admin_rating;
-    const tags = o && o.tags ? o.tags : base.tags;
+    const o = map[g.id] || null;
+    const e = local.size ? liveLocal(g.id, o) : null;
+    if (!o && !e && !g.__adminBase) continue;
+    const f = e ? e.fields : fieldsFrom(g, o);
     const before = JSON.stringify([g.admin_rating ?? null, g.tags || null]);
-    setFields(g, rating, tags);
+    setFields(g, f.admin_rating, f.tags);
     if (JSON.stringify([g.admin_rating ?? null, g.tags || null]) !== before) changed.push(g.id);
   }
   return changed;
 }
 
-/** Local edit (optimistic): sets fields and keeps the cached overrides map in step. */
-export function setGameFields(g, { admin_rating, tags }) {
+/** Optimistic local edit: the game shows `fields` now and keeps them over a stale GET. */
+export function setGameFields(g, fields) {
   baseOf(g);
-  setFields(g, admin_rating, tags);
+  const e = local.get(g.id) || { confirmed: null, serverAt: null, inflight: 0 };
+  e.fields = { admin_rating: fields.admin_rating ?? null, tags: (fields.tags || []).slice() };
+  e.at = Date.now();
+  local.set(g.id, e);
+  setFields(g, e.fields.admin_rating, e.fields.tags);
 }
 
-export async function saveGamePatch(gameId, patch) {
-  if (!SAVE_URL) throw new Error('save endpoint not configured');
-  const r = await fetch(SAVE_URL, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(saveBody(gameId, patch)),
-    signal: timeoutSignal(FETCH_TIMEOUT_MS),
-  });
-  if (!r.ok) throw new Error(`save failed (${r.status})`);
-  // Keep the device copy in step so the next boot shows the edit before the fetch lands.
-  const cached = readCachedOverrides() || {};
-  cached[gameId] = { ...(cached[gameId] || {}), ...patch };
-  writeCachedOverrides(cached);
-  return true;
+const ERROR_TOASTS = { 401: 'Sign in to omgithub', 403: 'Not allowed', 503: 'Edits paused' };
+export function saveErrorToast(status) {
+  return `${ERROR_TOASTS[status] || "Couldn't save"} — reverted`;
+}
+
+/**
+ * POST one patch for game `g`. On success the server's normalized override is applied
+ * (unless a later edit for the same game is still in flight). On failure the game goes
+ * back to the last saved value. Resolves to { ok: true } or { ok: false, status }.
+ */
+export async function saveGamePatch(g, patch) {
+  const e = local.get(g.id);
+  if (e) e.inflight++;
+  let status = 0;
+  let body = null;
+  try {
+    const r = await fetch(SAVE_URL, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(saveBody(g.id, patch)),
+      signal: timeoutSignal(FETCH_TIMEOUT_MS),
+    });
+    status = r.status;
+    body = await r.json().catch(() => null);
+    if (!r.ok || !body || body.ok === false) throw new Error('save failed');
+  } catch (_) {
+    if (e) e.inflight = Math.max(0, e.inflight - 1);
+    if (e && e.inflight === 0) {
+      if (e.confirmed) e.fields = e.confirmed;
+      else local.delete(g.id);
+    }
+    if (!e || e.inflight === 0) applyOverrides([g]);
+    return { ok: false, status };
+  }
+  const o = cleanEntry(body.override);
+  const saved = fieldsFrom(g, o);
+  // Keep the device copy of the server map in step for the next boot.
+  const map = readCachedOverrides() || {};
+  if (o) map[g.id] = o;
+  else delete map[g.id];
+  serverMap = map;
+  writeJSON(OVERRIDES_CACHE_KEY, map);
+  if (e) {
+    e.inflight = Math.max(0, e.inflight - 1);
+    e.confirmed = saved;
+    e.serverAt = o?.updated_at || null;
+    e.at = Date.now();
+    if (e.inflight === 0) {
+      e.fields = saved;
+      setFields(g, saved.admin_rating, saved.tags);
+    }
+    persistLocal();
+  }
+  return { ok: true };
 }
 
 /* ---- Edit sheet (reuses the comments-sheet look) ---- */
