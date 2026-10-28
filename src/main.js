@@ -2132,6 +2132,7 @@ function wireCreateSheet() {
     btn.classList.remove('bounce');
     void btn.offsetWidth;
     btn.classList.add('bounce');
+    btn.classList.remove('glow');
     openCreateSheet();
   });
   // Start warming on first touch/hover of ＋, before the click lands.
@@ -2139,6 +2140,16 @@ function wireCreateSheet() {
   btn.addEventListener('pointerdown', warmAll, { passive: true });
   btn.addEventListener('pointerenter', warmAll, { passive: true });
   btn.addEventListener('animationend', () => btn.classList.remove('bounce'));
+  // One soft glow ring per session to hint at ＋ (skipped under reduced motion).
+  try {
+    if (!sessionStorage.getItem('opus-feed-plus-glow')) {
+      sessionStorage.setItem('opus-feed-plus-glow', '1');
+      if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+        setTimeout(() => btn.classList.add('glow'), 2500);
+        setTimeout(() => btn.classList.remove('glow'), 2500 + 3300);
+      }
+    }
+  } catch (_) {}
   createSheetEl.querySelectorAll('[data-close-create]').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
