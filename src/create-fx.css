@@ -53,6 +53,9 @@
   padding: 8px 12px;
   border-radius: 999px;
   white-space: nowrap;
+  max-width: min(78vw, 300px);
+  overflow: hidden;
+  text-overflow: ellipsis;
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -1,33 +1,74 @@
 /* Create-sheet extras: typewriter placeholder, idea chips, Send ripple and the warp
  * jump on Send (CSS only). prefers-reduced-motion → plain sheet, no animation. */
 
-// Every suggestion riffs on a well-known game.
-const IDEAS = [
-  'Minecraft but underwater',
-  'Warcraft with cats',
-  'Call of Duty in space',
-  'League of Legends as a racing game',
-  'Rocket League with dinosaurs',
-  'Tetris but the blocks fight back',
-  'Among Us on a pirate ship',
-  'Mario Kart with shopping carts',
+// Approved suggestion lines (ideas-v2). Each ＋ open shows a fresh shuffle
+// (typewriter + chips), skipping what the previous opens showed.
+const POOL = [
+  ["🧱", "Tetris where cleared lines become platforms you jump on"],
+  ["🪝", "Flappy Bird with a grappling hook"],
+  ["🧟", "Vampire Survivors, but you play the horde"],
+  ["🌀", "Portal, but you can only place one portal"],
+  ["👻", "Pac-Man where the ghosts learn your route each level"],
+  ["🐍", "Snake that leaves walls behind instead of growing"],
+  ["🏰", "Angry Birds where you build the tower your friend attacks"],
+  ["🔫", "Doom with one bullet you have to pick back up"],
+  ["🎵", "Geometry Dash you play by tapping to the beat"],
+  ["👾", "Space Invaders where you're the invaders"],
+  ["🐸", "Frogger where every car is controlled by a past run of yours"],
+  ["♟️", "Chess where every capture swaps the pieces' powers"],
+  ["🪙", "Super Mario where every coin makes you jump higher"],
+  ["🍉", "Fruit Ninja with a combo-chaining sword"],
+  ["🏓", "Breakout where the ball splits on every hit"],
+  ["⚽", "1v1 Rocket League vs a bot, first to 3 goals"],
+  ["⛏️", "Minecraft-style voxel island with a day and night cycle"],
+  ["🏎️", "60-second Mario Kart time trial on one track"],
+  ["🃏", "Mini Clash Royale with 4 cards and one lane"],
+  ["🗝️", "One-room Zelda dungeon with a key and a boss"],
+  ["🐞", "Hollow Knight-style boss fight in a single arena"],
+  ["🚇", "Subway Surfers endless runner with three lanes"],
+  ["🚓", "Top-down GTA car chase through one city block"],
+  ["🌾", "Pocket Stardew Valley with a 3×3 farm and seasons"],
+  ["🧗", "Celeste-style climb with dash and wall jump, 5 screens"],
+  ["🦸", "Overwatch-style 1v1 arena with two heroes"],
+  ["🗡️", "Hades-style room clear with three weapon choices"],
+  ["🏛️", "Civilization on a tiny 10×10 map, 20 turns"],
+  ["🥋", "Street Fighter duel with three special moves"],
+  ["🛹", "Tony Hawk skate park with a 2-minute trick run"],
+  ["🎴", "Slay the Spire deckbuilding with Pokémon catching"],
+  ["🔪", "Among Us rules inside a Counter-Strike round"],
+  ["🌙", "Stardew farming by day, tower defense at night"],
+  ["🏠", "Tetris blocks that build your Minecraft house"],
+  ["🦇", "Dark Souls bosses in a Flappy Bird cave"],
+  ["🚀", "Rocket League with Mario Kart items"],
+  ["🎸", "Pokémon battles decided by Guitar Hero rhythm"],
+  ["🏘️", "The Sims neighborhood where every house is a Doom level"],
+  ["💣", "Fortnite building inside a Worms artillery match"],
+  ["💎", "Diablo loot in a Vampire Survivors run"],
 ];
-const CHIP_IDEAS = [
-  ['⛏️', 'Minecraft but underwater'],
-  ['🐱', 'Warcraft with cats'],
-  ['🚀', 'Call of Duty in space'],
-  ['🏎️', 'League of Legends as a racing game'],
-  ['🦖', 'Rocket League with dinosaurs'],
-];
-const FAMOUS = ['Minecraft', 'Warcraft', 'Call of Duty', 'League of Legends', 'Rocket League', 'Fortnite', 'GTA', 'Mario Kart', 'Tetris', 'Among Us', 'Zelda', 'Pokémon', 'Doom', 'Portal', 'Pac-Man', 'Flappy Bird', 'Angry Birds', 'Stardew Valley', 'Fall Guys', 'Clash Royale'];
-const TWISTS = [
-  'but underwater', 'but in space', 'but everyone is a cat', 'but gravity flips every 10s', 'but it’s a cooking game',
-  'but you play as the villain', 'but it’s 2D pixel art', 'but on a tiny planet', 'but it’s a rhythm game', 'but set in the Wild West',
-  'with dinosaurs', 'with cats', 'with zombies', 'with shopping carts', 'with laser sharks', 'with a talking sword',
-  'as a racing game', 'as a tower defense', 'as a farming sim', 'as a puzzle game', 'as a co-op roguelike', 'as a dating sim',
-];
-const pick = (a) => a[Math.floor(Math.random() * a.length)];
-
+const IDEAS = POOL.map(([, t]) => t);
+const RECENT_KEY = 'opus-create-ideas-recent';
+const RECENT_MAX = 24;
+const readRecent = () => {
+  try { const a = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (_) { return []; }
+};
+const pushRecent = (items) => {
+  const next = [...items, ...readRecent().filter((t) => !items.includes(t))].slice(0, RECENT_MAX);
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch (_) {}
+};
+const shuffle = (a) => {
+  const b = a.slice();
+  for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; }
+  return b;
+};
+/** n fresh pool entries, avoiding recently shown ones (falls back if the pool runs dry). */
+const drawFresh = (n, exclude = []) => {
+  const recent = new Set([...readRecent(), ...exclude]);
+  const fresh = shuffle(POOL.filter(([, t]) => !recent.has(t)));
+  const rest = shuffle(POOL.filter(([, t]) => recent.has(t) && !exclude.includes(t)));
+  return [...fresh, ...rest].slice(0, n);
+};
+const CHIP_COUNT = 4;
+const TYPE_COUNT = 6;
 const reduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 /* ---------------- attach ---------------- */
@@ -49,14 +90,15 @@ export function attachCreateFx({ sheet, prompt, send, getTitle, onFill }) {
   const ghostText = ghost.firstChild;
   const basePlaceholder = prompt.getAttribute('placeholder') || '';
 
-  let tw = 0, twIdea = Math.floor(Math.random() * IDEAS.length), twPos = 0, twDir = 1;
+  let tw = 0, twIdea = 0, twPos = 0, twDir = 1;
+  let twList = IDEAS.slice(0, TYPE_COUNT);
   const twStep = () => {
     tw = 0;
     if (!sheet.classList.contains('open') || prompt.value) return;
-    const idea = IDEAS[twIdea];
+    const idea = twList[twIdea % twList.length];
     let delay = 55 + Math.random() * 45;
     if (twDir > 0) { twPos++; if (twPos >= idea.length) { twDir = -1; delay = 1500; } }
-    else { twPos -= 2; if (twPos <= 0) { twPos = 0; twDir = 1; twIdea = (twIdea + 1) % IDEAS.length; delay = 380; } else delay = 22; }
+    else { twPos -= 2; if (twPos <= 0) { twPos = 0; twDir = 1; twIdea = (twIdea + 1) % twList.length; delay = 380; } else delay = 22; }
     ghostText.textContent = idea.slice(0, twPos);
     tw = setTimeout(twStep, delay);
   };
@@ -74,11 +116,24 @@ export function attachCreateFx({ sheet, prompt, send, getTitle, onFill }) {
   chips.className = 'fx-chips';
   chips.setAttribute('role', 'list');
   wrap.after(chips);
+  let shownNow = [];
+  const surprise = () => {
+    // Only approved lines; never one shown in this or recent opens (pool wraps if exhausted).
+    const t = drawFresh(1, shownNow)[0]?.[1] || IDEAS[Math.floor(Math.random() * IDEAS.length)];
+    pushRecent([t]);
+    return t;
+  };
   const buildChips = () => {
     const title = (getTitle() || '').trim();
     const list = [['🎲', 'Surprise me', 'random']];
     if (title) list.push(['✨', `Like ${title} but…`, `Like ${title} but `]);
-    CHIP_IDEAS.forEach(([e, t]) => list.push([e, t, t]));
+    const drawn = drawFresh(CHIP_COUNT + TYPE_COUNT);
+    const chipIdeas = drawn.slice(0, CHIP_COUNT);
+    twList = drawn.slice(CHIP_COUNT).map(([, t]) => t);
+    twIdea = 0;
+    shownNow = drawn.map(([, t]) => t);
+    pushRecent(shownNow);
+    chipIdeas.forEach(([e, t]) => list.push([e, t, t]));
     chips.textContent = '';
     list.forEach(([e, label, text]) => {
       const b = document.createElement('button');
@@ -87,9 +142,10 @@ export function attachCreateFx({ sheet, prompt, send, getTitle, onFill }) {
       b.setAttribute('role', 'listitem');
       b.innerHTML = `<span aria-hidden="true">${e}</span> `;
       b.append(label);
+      if (text !== 'random') b.title = text.trim();
       b.addEventListener('click', (ev) => {
         ev.preventDefault(); ev.stopPropagation();
-        const t = text === 'random' ? `${pick(FAMOUS)} ${pick(TWISTS)}` : text;
+        const t = text === 'random' ? surprise() : text;
         typeIn(t);
       });
       chips.appendChild(b);
@@ -136,7 +192,13 @@ export function attachCreateFx({ sheet, prompt, send, getTitle, onFill }) {
 
   return {
     motion,
-    open() { buildChips(); syncGhost(); },
+    open() {
+      buildChips();
+      clearTimeout(tw); tw = 0; ghostText.textContent = '';
+      syncGhost();
+      // The sheet gets .open a frame later; start the typewriter once it has it.
+      requestAnimationFrame(() => requestAnimationFrame(syncGhost));
+    },
     close() {
       clearTimeout(tw); tw = 0; clearTimeout(typing);
       sheet.classList.remove('fx-warp', 'fx-flash');
