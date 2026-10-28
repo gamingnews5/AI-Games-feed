@@ -2167,7 +2167,40 @@ function wireCreateSheet() {
       createSendEl.click();
     }
   });
+  // Send with the keyboard open: on touch the tap first blurs the textarea, the
+  // keyboard closes and the sheet drops, so the button leaves the finger and the
+  // click never fires (or lands elsewhere). Keep focus through the press and send
+  // on the touch's pointerup (a user activation, so window.open is still allowed);
+  // the click that may follow is swallowed so it can't open a second tab.
+  let sendTap = null;
+  let sendTapAt = 0;
+  const keepPromptFocus = (e) => {
+    if (document.activeElement === createPromptEl) e.preventDefault();
+  };
+  createSendEl.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    keepPromptFocus(e);
+    sendTap = e.pointerType === 'mouse' ? null : { id: e.pointerId, x: e.clientX, y: e.clientY };
+  });
+  createSendEl.addEventListener('mousedown', keepPromptFocus);
+  createSendEl.addEventListener('pointercancel', () => { sendTap = null; });
+  createSendEl.addEventListener('pointerup', (e) => {
+    const tap = sendTap;
+    sendTap = null;
+    if (!tap || tap.id !== e.pointerId) return;
+    if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 16) return;
+    sendTapAt = Date.now();
+    doCreateSend(e);
+  });
   createSendEl.addEventListener('click', (e) => {
+    if (Date.now() - sendTapAt < 1000) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    doCreateSend(e);
+  });
+  function doCreateSend(e) {
     e.stopPropagation();
     const text = createPromptEl.value.trim();
     if (!text) {
@@ -2203,7 +2236,7 @@ function wireCreateSheet() {
     const warp = createFx.warp(text);
     setTimeout(() => window.open(url, '_blank', 'noopener'), CREATE_WARP_OPEN_MS);
     warp.then(() => setTimeout(finish, 120));
-  });
+  }
   window.visualViewport?.addEventListener('resize', () => { if (createOpen) syncCreateKeyboard(); });
   window.visualViewport?.addEventListener('scroll', () => { if (createOpen) syncCreateKeyboard(); });
 }
