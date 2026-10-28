@@ -1559,3 +1559,71 @@ html.app-kb .create-sheet .create-panel {
   .loadbar i { animation: none; width: 100%; opacity: 0.6; }
   .loadbar { transition: none; }
 }
+
+/* ---- Admin only (elements exist only after /api/me says is_admin) ---- */
+.rail-btn.admin-edit {
+  width: 34px;
+  height: 34px;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.6;
+  box-shadow: none;
+}
+.rail-btn.admin-edit:active { opacity: 1; }
+.admin-sheet { z-index: 55; }
+html.is-admin .toast { z-index: 60; }
+.admin-panel { max-height: min(62dvh, 560px); }
+.admin-body {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 10px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.admin-label { font-size: 12px; font-weight: 700; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 4px; }
+.admin-ratings { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
+.admin-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.admin-chip {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 7px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.admin-ratings .admin-chip { padding: 8px 0; border-radius: 10px; }
+.admin-chip.admin-hint { border-style: dashed; border-color: rgba(255, 255, 255, 0.4); }
+.admin-chip.on { background: #7c5cff; border-color: #b9a6ff; }
+.admin-chip:active { transform: scale(0.94); }
+.admin-add { display: flex; gap: 6px; }
+.admin-add-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 16px; /* no iOS zoom */
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 7px 10px;
+}
+.admin-add-input.bad { border-color: #ff6b6b; animation: admin-shake 0.25s; }
+@keyframes admin-shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.admin-add-btn {
+  appearance: none;
+  border: none;
+  font: inherit;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(124, 92, 255, 0.8);
+  border-radius: 10px;
+  padding: 0 14px;
+  cursor: pointer;
+}

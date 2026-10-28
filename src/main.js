@@ -6,6 +6,7 @@ import {
   REPO_RAW_BASE,
 } from './feed-from-catalog.js';
 import * as analytics from './analytics.js';
+import * as admin from './admin.js';
 import { MEDIA_BASE } from './catalog-config.js';
 import { searchGames, queryWords } from './search.js';
 import { siteFor, isKnownHost, gameCanonicalUrl, MAIN_ORIGIN } from './sites.js';
@@ -131,6 +132,11 @@ function platformLabel(platforms) {
   if (mobile) return 'Mobile';
   if (pc) return 'PC';
   return '';
+}
+
+/** Admin rating (override) wins over the catalog's screenshot_score. */
+function effectiveScore(g) {
+  return g.admin_rating ?? g.screenshot_score ?? -1;
 }
 
 function scoreLabel(score) {
@@ -486,7 +492,7 @@ function sortGames(games, mode) {
       return (Number(b.remote_likes) || 0) - (Number(a.remote_likes) || 0);
     });
   } else {
-    list.sort((a, b) => (b.screenshot_score ?? -1) - (a.screenshot_score ?? -1));
+    list.sort((a, b) => effectiveScore(b) - effectiveScore(a));
   }
   // Stable: keeps the Top/New order inside each group.
   list.sort((a, b) => feedGroup(a) - feedGroup(b));
@@ -711,6 +717,9 @@ function onHistoryPop() {
   }
   if (createOpen && state.opus !== 'create') {
     closeCreateSheet();
+  }
+  if (adminOpen && state.opus !== 'admin') {
+    closeAdminEdit();
   }
   if (state.opus) return;
   const urlLiked = likedFromUrl();
@@ -2626,6 +2635,49 @@ function loadSlidesHtml(game) {
   return `<div class="load-slides" aria-hidden="true" style="--slide-ms:${SLIDE_MS}ms;--slide-fade-ms:${SLIDE_FADE_MS}ms">${slides}</div>`;
 }
 
+/** Score + platform / made-with / engine / tag chips (rebuilt in place by refreshCardMeta). */
+function badgesHtml(game) {
+  const platHtml = platformTags(game.platforms)
+    .map((t) => chipHtml(t, tagLabel(t), 'platform'))
+    .join('');
+
+  const madeLabel = MADE_LABELS[String(game.made_with || '').toLowerCase()] || '';
+  const madeTag = madeWithTag(game.made_with);
+  const madeHtml = madeLabel && madeTag ? chipHtml(madeTag, madeLabel, 'made-with') : '';
+
+  const engTag = normalizeTag(String(game.engine || '').replace(/[\s.]+/g, '-'));
+  const engineHtml = game.engine
+    ? `<button type="button" class="engine tag-chip${engTag && engTag === activeTag ? ' active' : ''}" data-tag="${escapeHtml(engTag)}" title="Made in ${escapeHtml(game.engine)} — tap to filter">${escapeHtml(game.engine)}</button>`
+    : '';
+  const tagsHtml = (Array.isArray(game.tags) ? game.tags : [])
+    .map(
+      (t) =>
+        chipHtml(t, tagLabel(t)),
+    )
+    .join('');
+
+  return `
+        <span class="score">${escapeHtml(scoreLabel(game.admin_rating ?? game.screenshot_score))}</span>
+        ${platHtml}
+        ${madeHtml}
+        ${engineHtml}
+        ${tagsHtml}
+      `;
+}
+
+function wireTagChips(card, game) {
+  card.querySelectorAll('.tag-chip').forEach((chip) => {
+    chip.addEventListener('pointerdown', (e) => e.stopPropagation());
+    chip.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const t = chip.dataset.tag || '';
+      if (t && t !== activeTag) analytics.track('tag', { game_id: game.id, tag: t });
+      if (t) applyTagFilter(t === activeTag ? '' : t);
+    });
+  });
+}
+
 function buildCard(game, index) {
   const card = document.createElement('article');
   card.className = 'card';
@@ -2645,25 +2697,6 @@ function buildCard(game, index) {
   const desc = game.description
     ? `<p class="desc">${escapeHtml(game.description)}</p>`
     : '';
-
-  const platHtml = platformTags(game.platforms)
-    .map((t) => chipHtml(t, tagLabel(t), 'platform'))
-    .join('');
-
-  const madeLabel = MADE_LABELS[String(game.made_with || '').toLowerCase()] || '';
-  const madeTag = madeWithTag(game.made_with);
-  const madeHtml = madeLabel && madeTag ? chipHtml(madeTag, madeLabel, 'made-with') : '';
-
-  const engTag = normalizeTag(String(game.engine || '').replace(/[\s.]+/g, '-'));
-  const engineHtml = game.engine
-    ? `<button type="button" class="engine tag-chip${engTag && engTag === activeTag ? ' active' : ''}" data-tag="${escapeHtml(engTag)}" title="Made in ${escapeHtml(game.engine)} — tap to filter">${escapeHtml(game.engine)}</button>`
-    : '';
-  const tagsHtml = (Array.isArray(game.tags) ? game.tags : [])
-    .map(
-      (t) =>
-        chipHtml(t, tagLabel(t)),
-    )
-    .join('');
 
   const liked = isLiked(game.id);
   const likeN = displayLikeCount(game);
@@ -2693,13 +2726,7 @@ function buildCard(game, index) {
       </svg>
     </button>`}
     <div class="card-body">
-      <div class="badges">
-        <span class="score">${escapeHtml(scoreLabel(game.screenshot_score))}</span>
-        ${platHtml}
-        ${madeHtml}
-        ${engineHtml}
-        ${tagsHtml}
-      </div>
+      <div class="badges">${badgesHtml(game)}</div>
       ${authorRowHtml(game)}
       <h2 class="title">${escapeHtml(game.title)}</h2>
       ${desc}
@@ -2740,16 +2767,8 @@ function buildCard(game, index) {
     setMutedPreference(!effectiveMuted());
   });
 
-  card.querySelectorAll('.tag-chip').forEach((chip) => {
-    chip.addEventListener('pointerdown', (e) => e.stopPropagation());
-    chip.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const t = chip.dataset.tag || '';
-      if (t && t !== activeTag) analytics.track('tag', { game_id: game.id, tag: t });
-      if (t) applyTagFilter(t === activeTag ? '' : t);
-    });
-  });
+  wireTagChips(card, game);
+  if (isAdmin) addAdminButton(card);
   if (isDownloadGame(game)) wireDownloadButton(card.querySelector('.play'), game);
   else wirePlayButton(card.querySelector('.play'), game);
 
@@ -3573,6 +3592,8 @@ async function init() {
   catalogCount = catalogCountOf(data);
 
   allGames = playableGames(data);
+  // Admin overrides (rating/tags) from the device copy apply before the first render.
+  admin.applyOverrides(allGames, admin.readCachedOverrides());
 
   wireAudioGesture();
   wireCommentsSheet();
@@ -3606,6 +3627,8 @@ async function init() {
     feedEl.addEventListener('scroll', onFeedScroll, { passive: true });
   }
   requestAnimationFrame(watchFirstCardMedia);
+  // Never ahead of the first card: overrides + admin check start once it is up.
+  setTimeout(startAdminBoot, 0);
 }
 
 function playableGames(data) {
@@ -3625,9 +3648,121 @@ function catalogCountOf(data) {
 function applyFreshCatalog(data) {
   const games = playableGames(data);
   if (!games.length) return;
+  admin.applyOverrides(games, latestOverrides || admin.readCachedOverrides());
   allGames = games;
   catalogCount = catalogCountOf(data);
   syncLikeTotal();
+}
+
+/* ---- Admin: overrides for everyone, ✎ edit sheet for admins ---- */
+let isAdmin = false;
+let adminOpen = false;
+let latestOverrides = null;
+/** Last server-acknowledged {admin_rating, tags} per game (revert target on a failed save). */
+const adminConfirmed = new Map();
+const adminChains = new Map();
+
+function startAdminBoot() {
+  admin.fetchOverrides().then((map) => {
+    if (!map) return;
+    latestOverrides = map;
+    // Patch cards in place (no re-sort, no scroll): the current card never jumps.
+    admin.applyOverrides(allGames, map).forEach(refreshCardMeta);
+  });
+  admin.fetchIsAdmin().then((yes) => {
+    if (!yes) return;
+    isAdmin = true;
+    document.documentElement.classList.add('is-admin');
+    cards().forEach(addAdminButton);
+  });
+}
+
+function refreshCardMeta(id) {
+  const game = allGames.find((g) => g.id === id);
+  if (!game) return;
+  feedEl.querySelectorAll(`.card[data-id="${CSS.escape(id)}"]`).forEach((card) => {
+    const badges = card.querySelector('.badges');
+    if (!badges) return;
+    badges.innerHTML = badgesHtml(game);
+    wireTagChips(card, game);
+  });
+}
+
+function addAdminButton(card) {
+  const rail = card.querySelector('.rail');
+  if (!rail || rail.querySelector('.admin-edit')) return;
+  rail.insertAdjacentHTML('beforeend', admin.EDIT_BTN_HTML);
+  rail.querySelector('.admin-edit').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openAdminEdit(card.dataset.id);
+  });
+}
+
+function adminAllTags() {
+  const freq = new Map();
+  for (const g of allGames) for (const t of Array.isArray(g.tags) ? g.tags : []) freq.set(t, (freq.get(t) || 0) + 1);
+  return [...freq.keys()].sort((a, b) => freq.get(b) - freq.get(a) || a.localeCompare(b));
+}
+
+function adminSnapshot(game) {
+  return { admin_rating: game.admin_rating ?? null, tags: Array.isArray(game.tags) ? game.tags.slice() : [] };
+}
+
+function openAdminEdit(id) {
+  const game = allGames.find((g) => g.id === id);
+  if (!isAdmin || !game || adminOpen) return;
+  if (commentsOpen) closeCommentsSheet();
+  adminOpen = true;
+  autoAdvancePaused = true;
+  admin.openAdminSheet({
+    game,
+    allTags: adminAllTags(),
+    label: tagLabel,
+    onChange: (patch) => adminEdit(game, patch),
+    onDismiss: dismissAdminEdit,
+  });
+  pushOverlayHistory('admin');
+}
+
+function closeAdminEdit() {
+  if (!adminOpen) return;
+  adminOpen = false;
+  admin.closeAdminSheet();
+  autoAdvancePaused = false;
+}
+
+function dismissAdminEdit() {
+  if (history.state && history.state.opus === 'admin') {
+    history.back();
+    return;
+  }
+  closeAdminEdit();
+}
+
+/** Optimistic edit: card + in-memory game now; saves run in order; a failure reverts. */
+function adminEdit(game, patch) {
+  if (!adminConfirmed.has(game.id)) adminConfirmed.set(game.id, adminSnapshot(game));
+  admin.setGameFields(game, { ...adminSnapshot(game), ...patch });
+  refreshCardMeta(game.id);
+  admin.renderAdminSheet();
+  const prev = adminChains.get(game.id) || Promise.resolve();
+  const run = prev.then(() =>
+    admin.saveGamePatch(game.id, patch).then(
+      () => {
+        const ok = { ...adminConfirmed.get(game.id), ...patch };
+        adminConfirmed.set(game.id, ok);
+      },
+      () => {
+        const back = adminConfirmed.get(game.id);
+        admin.setGameFields(game, back);
+        refreshCardMeta(game.id);
+        if (admin.adminSheetGameId() === game.id) admin.renderAdminSheet();
+        showToast("Couldn't save — reverted");
+      },
+    ),
+  );
+  adminChains.set(game.id, run);
 }
 
 /* Loading bar until the first card's poster / slide / clip frame is on screen; then
