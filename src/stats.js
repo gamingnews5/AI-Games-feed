@@ -75,10 +75,77 @@ function render(d) {
   list('zero', d.zero_searches_7d, (r) => `<span class="name">${esc(r.q)}</span><span class="num"><b>${fmt(r.n)}</b>×</span>`);
   list('searches', d.top_searches_7d, (r) => `<span class="name"><a href="/?search=${encodeURIComponent(r.q)}" target="_blank" rel="noopener">${esc(r.q)}</a></span><span class="num"><b>${fmt(r.n)}</b>× · ${fmt(r.results)} results</span>`);
   list('tags', d.top_tags_7d, (r) => `<span class="name"><a href="/?tag=${encodeURIComponent(r.tag)}" target="_blank" rel="noopener">${esc(r.tag)}</a></span><span class="num"><b>${fmt(r.n)}</b> taps</span>`);
-  list('sources', d.sources_7d, (r) => `<span class="name">${esc(r.source || '(direct)')}</span><span class="num"><b>${fmt(r.visits)}</b> visits · ${fmt(r.sessions)} sessions · ${fmt(r.plays)} plays · ${fmt(r.likes)} likes</span>`);
+  renderSources(d.sources_7d);
   list('daily', (d.daily_30d || []).slice().reverse(), (r) => `<span class="name">${esc(new Date(r.d).toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span><span class="num"><b>${fmt(r.views)}</b> views · <b>${fmt(r.plays)}</b> plays</span>`);
 }
 
+/* ---- Sources (7d): tap a row to see its exact referrer / landing links ---- */
+const openSources = new Set();
+const safeUrl = (u) => {
+  try {
+    const x = new URL(String(u ?? ''));
+    return x.protocol === 'http:' || x.protocol === 'https:' ? x.href : '';
+  } catch (_) {
+    return '';
+  }
+};
+const extLink = (href, text) => href
+  ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`
+  : `<span>${esc(text)}</span>`;
+const sourceName = (src) => {
+  const s = String(src || '');
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(s)) return extLink(safeUrl(`https://${s}`), s);
+  return esc(s || '(direct)');
+};
+const landingHref = (path) => {
+  const p = String(path ?? '');
+  if (!p.startsWith('/') || p.startsWith('//')) return '';
+  const u = safeUrl(`https://games.omgithub.com${p}`);
+  return u && new URL(u).origin === 'https://games.omgithub.com' ? u : '';
+};
+
+function renderSources(rows) {
+  const el = $('sources');
+  if (!rows || !rows.length) { el.innerHTML = '<div class="empty">Nothing yet</div>'; return; }
+  el.innerHTML = rows.map((r) => {
+    const key = String(r.source ?? '');
+    const refs = Array.isArray(r.referrers) ? r.referrers : null;
+    const lands = Array.isArray(r.landings) ? r.landings : null;
+    const expandable = !!(refs || lands);
+    const open = expandable && openSources.has(key);
+    const num = `<span class="num"><b>${fmt(r.visits)}</b> visits · ${fmt(r.sessions)} sessions · ${fmt(r.plays)} plays · ${fmt(r.likes)} likes</span>`;
+    const head = expandable
+      ? `<div class="row src-row" role="button" tabindex="0" aria-expanded="${open}" data-source="${esc(key)}"><span class="caret">${open ? '▾' : '▸'}</span><span class="name">${sourceName(r.source)}</span>${num}</div>`
+      : `<div class="row"><span class="name">${sourceName(r.source)}</span>${num}</div>`;
+    if (!open) return head;
+    const sub = [];
+    (refs || []).forEach((x) => {
+      const href = safeUrl(x?.url);
+      sub.push(`<div class="row sub"><span class="name">${extLink(href, x?.url ?? '')}</span><span class="num"><b>${fmt(x?.visits)}</b> visits · ${fmt(x?.plays)} plays</span></div>`);
+    });
+    (lands || []).forEach((x) => {
+      sub.push(`<div class="row sub"><span class="tagl">landing</span><span class="name">${extLink(landingHref(x?.url), x?.url ?? '')}</span><span class="num"><b>${fmt(x?.visits)}</b> visits</span></div>`);
+    });
+    return head + `<div class="src-links">${sub.join('') || '<div class="empty">No links yet</div>'}</div>`;
+  }).join('');
+}
+
+function toggleSource(row) {
+  const k = row.dataset.source;
+  if (openSources.has(k)) openSources.delete(k); else openSources.add(k);
+  if (lastData) renderSources(lastData.sources_7d);
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#sources a')) return;
+  const row = e.target.closest('#sources .src-row');
+  if (row) toggleSource(row);
+});
+document.addEventListener('keydown', (e) => {
+  const row = e.target.closest?.('#sources .src-row');
+  if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleSource(row); }
+});
+
+let lastData = null;
 let busy = false;
 async function poll() {
   if (busy || document.visibilityState === 'hidden') return;
@@ -92,7 +159,8 @@ async function poll() {
       cache: 'no-store',
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    render(await res.json());
+    lastData = await res.json();
+    render(lastData);
     live.className = 'live ok';
     $('liveText').textContent = `live · ${new Date().toLocaleTimeString()}`;
   } catch (err) {
