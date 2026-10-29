@@ -33,16 +33,26 @@ function timeoutSignal(ms) {
   return c.signal;
 }
 
+let mePromise = null;
+/** One /api/me read per page: { signedIn, isAdmin }; any failure → signed out. */
+export function fetchMe() {
+  if (!mePromise) mePromise = (async () => {
+    try {
+      const r = await fetch(ME_URL, { credentials: 'include', cache: 'no-store', signal: timeoutSignal(FETCH_TIMEOUT_MS) });
+      if (!r.ok) return { signedIn: false, isAdmin: false };
+      const data = await r.json();
+      const u = data?.user;
+      return { signedIn: !!(u && u.id != null || u?.login) && data?.guest !== true && u?.guest !== true, isAdmin: u?.is_admin === true };
+    } catch (_) {
+      return { signedIn: false, isAdmin: false };
+    }
+  })();
+  return mePromise;
+}
+
 /** true only for data.user?.is_admin === true; any failure → false. */
 export async function fetchIsAdmin() {
-  try {
-    const r = await fetch(ME_URL, { credentials: 'include', cache: 'no-store', signal: timeoutSignal(FETCH_TIMEOUT_MS) });
-    if (!r.ok) return false;
-    const data = await r.json();
-    return data?.user?.is_admin === true;
-  } catch (_) {
-    return false;
-  }
+  return (await fetchMe()).isAdmin;
 }
 
 /** Chip slug: lowercase, spaces/underscores → '-', keeps dots ('opus-5.5'). */
