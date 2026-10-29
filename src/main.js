@@ -2995,7 +2995,8 @@ function freshGame(game) {
  * main-frame navigation the app intercepts and hands to a Chrome Custom Tab.
  */
 function openPlay(game, url) {
-  if (game?.needs_isolation) {
+  // An admin override link may point anywhere (e.g. an itch SAB build): use the isolation-safe path.
+  if (game?.needs_isolation || game?.play_url_override) {
     window.open(url, '_blank', 'noopener');
     return;
   }
@@ -3823,6 +3824,7 @@ function refreshCardMeta(id) {
   const game = allGames.find((g) => g.id === id);
   if (!game) return;
   feedEl.querySelectorAll(`.card[data-id="${CSS.escape(id)}"]`).forEach((card) => {
+    if (game.play_url && card.dataset.url !== game.play_url) card.dataset.url = game.play_url;
     const badges = card.querySelector('.badges');
     if (!badges) return;
     badges.innerHTML = badgesHtml(game);
@@ -3848,7 +3850,7 @@ function adminAllTags() {
 }
 
 function adminSnapshot(game) {
-  return { admin_rating: game.admin_rating ?? null, tags: Array.isArray(game.admin_tags) ? game.admin_tags.slice() : null };
+  return { admin_rating: game.admin_rating ?? null, tags: Array.isArray(game.admin_tags) ? game.admin_tags.slice() : null, play_url: game.play_url_override ? game.play_url : null };
 }
 
 function openAdminEdit(id) {
