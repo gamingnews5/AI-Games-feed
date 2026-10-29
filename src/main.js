@@ -10,6 +10,8 @@ import * as admin from './admin.js';
 import { MEDIA_BASE } from './catalog-config.js';
 import { searchGames, queryWords } from './search.js';
 import { siteFor, isKnownHost, gameCanonicalUrl, MAIN_ORIGIN } from './sites.js';
+// Admin "Clear scrolled games": finish the reset before any saved state is read.
+admin.consumePendingReset();
 
 const feedEl = document.getElementById('feed');
 const countEl = document.getElementById('count');
@@ -166,11 +168,15 @@ function writeSortMode(mode) {
 
 function readMobileOnly() {
   try {
-    return localStorage.getItem(MOBILE_KEY) === '1';
-  } catch (_) {
-    return false;
-  }
+    const v = localStorage.getItem(MOBILE_KEY);
+    if (v === '1' || v === '0') return v === '1';
+  } catch (_) {}
+  // No saved choice: the Android app / android.omgithub.com starts with Mobile on,
+  // unless a ?tag= link asked for a specific tag. Web hosts start with it off.
+  return MOBILE_DEFAULT;
 }
+// Decided once from the boot URL so later in-page tag changes don't flip it.
+const MOBILE_DEFAULT = inAiGameMakerApp() && !new URLSearchParams(window.location.search).get('tag');
 
 function readFitMode() {
   try {

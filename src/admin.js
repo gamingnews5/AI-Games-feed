@@ -329,6 +329,7 @@ function ensureSheet() {
           <button type="submit" class="admin-add-btn">Add</button>
         </form>
         <div class="admin-tags" role="group" aria-label="Tags"></div>
+        <button type="button" class="admin-reset-btn" data-admin-reset>Clear scrolled games</button>
       </div>
     </div>`;
   document.body.appendChild(sheetEl);
@@ -372,6 +373,10 @@ function ensureSheet() {
     if (!cur.includes(t)) sheetState.onChange({ tags: [...cur, t] });
     else renderAdminSheet();
   });
+  sheetEl.querySelector('[data-admin-reset]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    resetToFreshVisitor();
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && isAdminSheetOpen()) {
       e.preventDefault();
@@ -379,6 +384,44 @@ function ensureSheet() {
     }
   });
   return sheetEl;
+}
+
+/* ---- "Clear scrolled games": make this device look like a first-time visitor. ----
+ * Wipes every opus-* localStorage/sessionStorage key (seen, last game, likes, sort,
+ * Mobile filter, fit, mute, create-sheet ideas, + glow) and the cached catalog, but
+ * keeps admin data: recent tags and the overrides/just-saved copies. Analytics ids
+ * (feed.visitor / feed.session) and omgithub cookies are left alone. A sessionStorage
+ * flag repeats the wipe on the next boot, before anything is read, so a late write
+ * from the old page (scroll/seen timers) can't survive the reload. */
+const RESET_FLAG = 'opus-feed-reset-pending';
+const RESET_KEEP = new Set(['opus-feed-admin-recent-tags', OVERRIDES_CACHE_KEY, LOCAL_KEY]);
+export const RESET_CACHES = ['opus-feed-catalog-v1'];
+function wipeFeedState() {
+  const cleared = [];
+  for (const store of [localStorage, sessionStorage]) {
+    try {
+      for (const k of Object.keys(store)) {
+        if (k.startsWith('opus-') && !RESET_KEEP.has(k) && k !== RESET_FLAG) { store.removeItem(k); cleared.push(k); }
+      }
+    } catch (_) {}
+  }
+  return cleared;
+}
+export function resetToFreshVisitor() {
+  wipeFeedState();
+  try { sessionStorage.setItem(RESET_FLAG, '1'); } catch (_) {}
+  const go = () => window.location.replace(window.location.origin + '/');
+  const drop = typeof caches !== 'undefined' ? Promise.all(RESET_CACHES.map((c) => caches.delete(c).catch(() => {}))) : Promise.resolve();
+  Promise.race([drop, new Promise((r) => setTimeout(r, 800))]).then(go, go);
+}
+/** Call first thing on boot: finishes a pending reset (second wipe, then clears the flag). */
+export function consumePendingReset() {
+  try {
+    if (sessionStorage.getItem(RESET_FLAG) !== '1') return false;
+    sessionStorage.removeItem(RESET_FLAG);
+  } catch (_) { return false; }
+  wipeFeedState();
+  return true;
 }
 
 /* Recently touched tags (toggled or added on any game), newest first. */

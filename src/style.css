@@ -1628,6 +1628,22 @@ html.is-admin .toast { z-index: 60; }
   cursor: pointer;
 }
 
+.admin-reset-btn {
+  appearance: none;
+  align-self: flex-start;
+  margin-top: 6px;
+  border: 1px solid rgba(255, 107, 107, 0.5);
+  background: rgba(255, 107, 107, 0.12);
+  color: #ffb3b3;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.admin-reset-btn:active { transform: scale(0.96); }
+
 /* Author + "Game page" credit link (only on cards with a distinct page_url). */
 .author-row {
   display: flex;
