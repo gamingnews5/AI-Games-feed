@@ -1674,10 +1674,6 @@ html.is-admin .toast { z-index: 60; }
 .game-page-link:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
 
 /* Broken-game reports */
-.play-row { display: flex; align-items: center; gap: 12px; align-self: flex-start; }
-.play-row .play { align-self: auto; }
-.report-btn { appearance: none; border: none; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; padding: 12px 6px 6px; cursor: pointer; opacity: 0.75; }
-.report-btn:hover { opacity: 1; color: #fff; }
 .broken-badge { background: #d33 !important; color: #fff !important; font-weight: 700; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
 .report-desc { display: block; -webkit-line-clamp: unset; max-width: 46ch; }
 .report-desc p { margin: 2px 0; font-size: 13px; line-height: 1.35; }
@@ -1696,3 +1692,15 @@ html.is-admin .toast { z-index: 60; }
 .reports-chip { display: none; }
 .is-admin .reports-chip { display: inline-flex; }
 .reports-chip.active { background: #d33; color: #fff; }
+
+/* Report sheet keyboard: plain web pads by visualViewport --kb; app path rides html --kb. */
+.report-sheet { padding-bottom: var(--kb, 0px); }
+html.app-kb body.report-open .feed { height: var(--app-h, 100vh); }
+html.app-kb .report-sheet { top: 0; bottom: auto; height: var(--app-h, 100vh); padding-bottom: 0; }
+html.app-kb .report-sheet .comments-panel { translate: 0 calc(-1 * var(--kb, 0px)); }
+
+/* Dislike (thumbs-down) under like */
+.rail-btn.dislike .heart-fill { display: none; }
+.rail-btn.dislike.disliked .heart-fill { display: block; }
+.rail-btn.dislike.disliked .heart-outline { display: none; }
+.rail-btn.dislike.disliked .rail-icon { background: rgba(255, 255, 255, 0.22); }

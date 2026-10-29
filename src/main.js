@@ -2014,7 +2014,7 @@ function wireAppKeyboard() {
   const syncAppH = () => {
     const px = window.innerHeight;
     const kbBusy = kbPx() > 0 || root.classList.contains('kb-anim');
-    if (px < lastPx && createOpen && kbBusy) return;
+    if (px < lastPx && (createOpen || reportSheetOpen) && kbBusy) return;
     const h = `${px}px`;
     lastPx = px;
     if (h !== lastH) { lastH = h; root.style.setProperty('--app-h', h); }
@@ -2827,6 +2827,7 @@ function buildCard(game, index) {
     : '';
 
   const liked = isLiked(game.id);
+  const disliked = isDisliked(game.id);
   const likeN = displayLikeCount(game);
   const cmtN = commentCount(game);
   // Always show a compact number so empty feeds aren't confusing (0 is fine).
@@ -2858,17 +2859,25 @@ function buildCard(game, index) {
       ${authorRowHtml(game)}
       <h2 class="title">${escapeHtml(game.title)}</h2>
       ${desc}
-      <div class="play-row">${playOrDownloadHtml(game)}<button type="button" class="report-btn" aria-label="Report broken game" title="Report broken game">⚑ Report</button></div>
+      ${playOrDownloadHtml(game)}
     </div>
     <div class="rail" aria-label="Actions">
       <button type="button" class="rail-btn like ${liked ? 'liked' : ''}" aria-pressed="${liked ? 'true' : 'false'}" aria-label="${liked ? 'Unlike' : 'Like'}">
         <span class="rail-icon" aria-hidden="true">
-          <svg class="icon-heart" viewBox="0 0 24 24" width="28" height="28">
-            <path class="heart-outline" d="M12 21s-6.7-4.35-9.33-8.1C.8 10.35 1.2 6.9 3.9 5.25 6.1 3.9 8.7 4.35 12 7.2c3.3-2.85 5.9-3.3 8.1-1.95 2.7 1.65 3.1 5.1 1.23 7.65C18.7 16.65 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-            <path class="heart-fill" d="M12 21s-6.7-4.35-9.33-8.1C.8 10.35 1.2 6.9 3.9 5.25 6.1 3.9 8.7 4.35 12 7.2c3.3-2.85 5.9-3.3 8.1-1.95 2.7 1.65 3.1 5.1 1.23 7.65C18.7 16.65 12 21 12 21z" fill="currentColor"/>
+          <svg class="icon-thumb" viewBox="0 0 24 24" width="27" height="27">
+            <path class="heart-outline" d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3zm0 0 4-7.2c.3-.5.9-.8 1.5-.7 1.1.2 1.8 1.3 1.5 2.4L13.2 8.5H19a2 2 0 0 1 2 2.3l-1.3 8.5A2 2 0 0 1 17.7 21H7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            <path class="heart-fill" d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3zm0 0 4-7.2c.3-.5.9-.8 1.5-.7 1.1.2 1.8 1.3 1.5 2.4L13.2 8.5H19a2 2 0 0 1 2 2.3l-1.3 8.5A2 2 0 0 1 17.7 21H7" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
           </svg>
         </span>
         ${likeCountHtml}
+      </button>
+      <button type="button" class="rail-btn dislike ${disliked ? 'disliked' : ''}" aria-pressed="${disliked ? 'true' : 'false'}" aria-label="${disliked ? 'Remove dislike' : 'Dislike'}">
+        <span class="rail-icon" aria-hidden="true">
+          <svg class="icon-thumb icon-thumb-down" viewBox="0 0 24 24" width="27" height="27" style="transform:rotate(180deg)">
+            <path class="heart-outline" d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3zm0 0 4-7.2c.3-.5.9-.8 1.5-.7 1.1.2 1.8 1.3 1.5 2.4L13.2 8.5H19a2 2 0 0 1 2 2.3l-1.3 8.5A2 2 0 0 1 17.7 21H7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            <path class="heart-fill" d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3zm0 0 4-7.2c.3-.5.9-.8 1.5-.7 1.1.2 1.8 1.3 1.5 2.4L13.2 8.5H19a2 2 0 0 1 2 2.3l-1.3 8.5A2 2 0 0 1 17.7 21H7" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+          </svg>
+        </span>
       </button>
       <button type="button" class="rail-btn comments" aria-label="Comments">
         <span class="rail-icon" aria-hidden="true">
@@ -2927,9 +2936,9 @@ function buildCard(game, index) {
     openCommentsSheet(game);
   });
 
-  card.querySelector('.report-btn').addEventListener('click', (e) => {
+  card.querySelector('.dislike').addEventListener('click', (e) => {
     e.stopPropagation();
-    openReport(game);
+    toggleDislike(game, e.currentTarget);
   });
 
   card.querySelector('.share').addEventListener('click', (e) => {
@@ -3852,6 +3861,35 @@ function reportsViewFromUrl() {
   }
 }
 
+/* Dislike: a per-device toggle; turning it on opens the report sheet (one report per
+ * game per device). Closing the sheet without Send keeps just the dislike. */
+const DISLIKED_KEY = 'opus-feed-disliked';
+function loadDisliked() {
+  try { const a = JSON.parse(localStorage.getItem(DISLIKED_KEY) || '[]'); return new Set(Array.isArray(a) ? a : []); } catch (_) { return new Set(); }
+}
+var dislikedIds;
+function dislikedSet() { return dislikedIds || (dislikedIds = loadDisliked()); }
+function isDisliked(id) { return dislikedSet().has(id); }
+function setDislikeBtn(btn, on) {
+  btn.classList.toggle('disliked', on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.setAttribute('aria-label', on ? 'Remove dislike' : 'Dislike');
+}
+function toggleDislike(game, btn) {
+  const set = dislikedSet();
+  const on = !set.has(game.id);
+  if (on) set.add(game.id); else set.delete(game.id);
+  try { localStorage.setItem(DISLIKED_KEY, JSON.stringify([...set])); } catch (_) {}
+  document.querySelectorAll('.card').forEach((c) => {
+    if (c.dataset.id === String(game.id)) c.querySelectorAll('.rail-btn.dislike').forEach((b) => setDislikeBtn(b, on));
+  });
+  if (btn && !btn.isConnected) setDislikeBtn(btn, on);
+  if (on) {
+    analytics.track('dislike', { game_id: game.id });
+    if (!reports.hasReported(game.id)) openReport(game);
+  }
+}
+
 function openReport(game) {
   if (reports.hasReported(game.id)) {
     showToast('Thanks — already reported');
@@ -3877,12 +3915,37 @@ function openReport(game) {
     onDismiss: dismissReport,
   });
   pushOverlayHistory('report');
+  document.body.classList.add('report-open');
+  syncReportKeyboard();
+}
+
+/* Keep the report sheet above the on-screen keyboard: the app's --kb path (html.app-kb)
+ * is handled in CSS; plain web/WebView uses visualViewport like the create sheet. */
+let reportKbWired = false;
+function syncReportKeyboard() {
+  const el = document.getElementById('reportSheet');
+  if (!el) return;
+  if (appKbOn) { el.style.removeProperty('--kb'); return; }
+  const vv = window.visualViewport;
+  const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+  el.style.setProperty('--kb', `${Math.round(kb)}px`);
+  if (!reportKbWired) {
+    reportKbWired = true;
+    const on = () => { if (reportSheetOpen) syncReportKeyboard(); };
+    vv?.addEventListener('resize', on);
+    vv?.addEventListener('scroll', on);
+    el.addEventListener('focusin', (e) => {
+      if (!e.target.matches('textarea, input')) return;
+      setTimeout(() => { syncReportKeyboard(); e.target.scrollIntoView({ block: 'nearest' }); }, 300);
+    });
+  }
 }
 
 function closeReportSheet() {
   if (!reportSheetOpen) return;
   reportSheetOpen = false;
   reports.closeReportSheet();
+  document.body.classList.remove('report-open');
   autoAdvancePaused = false;
 }
 
