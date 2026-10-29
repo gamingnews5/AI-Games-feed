@@ -2081,6 +2081,13 @@ function closeCommentsSheet() {
 const WEB_CREATE_ORIGIN = 'https://omgithub.com/';
 const APP_CREATE_ORIGIN = 'https://android-create.omgithub.com/';
 const CREATE_ORIGIN = inAiGameMakerApp() ? APP_CREATE_ORIGIN : WEB_CREATE_ORIGIN;
+// Android phone browser (not the AiGameMaker app): ＋ goes to the app's Google Play listing.
+const PLAY_PACKAGE = 'ai.game.maker';
+const PLAY_REFERRER = encodeURIComponent('utm_source=feed&utm_medium=create_button');
+const PLAY_WEB_URL = `https://play.google.com/store/apps/details?id=${PLAY_PACKAGE}&referrer=${PLAY_REFERRER}`;
+// intent:// opens the Play Store app on Chrome Android; S.browser_fallback_url covers no-Play devices.
+const PLAY_INTENT_URL = `intent://details?id=${PLAY_PACKAGE}&referrer=${PLAY_REFERRER}#Intent;scheme=market;package=com.android.vending;S.browser_fallback_url=${encodeURIComponent(PLAY_WEB_URL)};end`;
+const ANDROID_BROWSER = /Android/i.test(navigator.userAgent || '') && !inAiGameMakerApp();
 const createSheetEl = document.getElementById('createSheet');
 const createPromptEl = document.getElementById('createPrompt');
 const createSendEl = document.getElementById('createSend');
@@ -2272,12 +2279,17 @@ function wireCreateSheet() {
   const btn = document.getElementById('createGame');
   if (!btn || !createSheetEl || !createPromptEl || !createSendEl) return;
   // Static hrefs in index.html point at omgithub.com; app users get the app create site.
-  btn.href = CREATE_ORIGIN;
+  btn.href = ANDROID_BROWSER ? PLAY_WEB_URL : CREATE_ORIGIN;
   syncCreateSend();
   btn.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
     try { navigator.vibrate?.(10); } catch (_) {}
+    if (ANDROID_BROWSER) {
+      btn.classList.remove('glow');
+      window.location.href = PLAY_INTENT_URL;
+      return;
+    }
     btn.classList.remove('bounce');
     void btn.offsetWidth;
     btn.classList.add('bounce');
