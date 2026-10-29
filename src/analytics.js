@@ -10,7 +10,15 @@ const FLUSH_MS = 5000;
 const MAX_QUEUE = 200;
 const COLS = ['visitor', 'session', 'game_id', 'event', 'value', 'device', 'tag', 'search', 'sort'];
 
+/** Flip to false if the feed_events source columns are not live: nothing new is sent. */
+export const SOURCE_COLUMNS_LIVE = true;
+const SOURCE_COLS = ['referrer', 'landing', 'utm_source', 'utm_medium', 'utm_campaign'];
+const SOURCE_SENT_KEY = 'feed.source.sent';
+const OWN_HOSTS = new Set(['games.omgithub.com', 'android.omgithub.com', 'lolgames.net', 'omgithub.com']);
+const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+
 let enabled = false;
+let source = null; // captured once at load; attached to the session's first event
 let visitor = '';
 let session = '';
 let device = '';
@@ -30,7 +38,40 @@ function clip(s, n) {
   return String(s).slice(0, n);
 }
 
+/** Traffic source for this page load (null fields when absent). Exported for tests. */
+export function captureSource(href = location.href, referrer = document.referrer, ua = navigator.userAgent || '') {
+  const url = new URL(href);
+  const q = url.searchParams;
+  let ref = null;
+  try {
+    if (referrer) {
+      const r = new URL(referrer);
+      if (/^https?:$/.test(r.protocol) && r.origin !== url.origin && !OWN_HOSTS.has(r.hostname)) ref = clip(r.origin + r.pathname, 300);
+    }
+  } catch (_) {}
+  const app = /AiGameMaker\//.test(ua) || url.hostname === 'android.omgithub.com';
+  return {
+    referrer: ref,
+    landing: clip(url.pathname + url.search, 300),
+    utm_source: clip(q.get('utm_source') || q.get('ref') || (app ? 'app' : ''), 100),
+    utm_medium: clip(q.get('utm_medium'), 100),
+    utm_campaign: clip(q.get('utm_campaign'), 100),
+  };
+}
+
+/** Remove utm_* and ref from the address bar (keeps ?g=, ?tag= and everything else). */
+function cleanSourceParams() {
+  try {
+    const u = new URL(location.href);
+    let changed = false;
+    for (const k of [...UTM_KEYS, 'ref']) if (u.searchParams.has(k)) { u.searchParams.delete(k); changed = true; }
+    if (changed) history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+  } catch (_) {}
+}
+
 function init() {
+  try { source = captureSource(); } catch (_) { source = null; }
+  cleanSourceParams();
   try {
     const host = location.hostname;
     const debug = new URLSearchParams(location.search).has('debug');
@@ -95,6 +136,12 @@ export function track(event, fields = {}) {
       search: clip(fields.search, 100),
       sort: clip(fields.sort ?? sortMode, 16),
     });
+    if (SOURCE_COLUMNS_LIVE && source) {
+      let sent = false;
+      try { sent = sessionStorage.getItem(SOURCE_SENT_KEY) === '1'; sessionStorage.setItem(SOURCE_SENT_KEY, '1'); } catch (_) {}
+      if (!sent) Object.assign(queue[queue.length - 1], source);
+      source = null;
+    }
     if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
     if (!timer) timer = setTimeout(flush, FLUSH_MS);
   } catch (_) {}
@@ -105,13 +152,20 @@ export function flush() {
     if (timer) clearTimeout(timer);
     timer = 0;
     if (!queue.length) return;
-    // Same key set on every row (PostgREST bulk insert).
-    const rows = queue.splice(0, 100).map((r) => {
-      const o = {};
-      COLS.forEach((c) => (o[c] = r[c] ?? null));
-      return o;
-    });
+    // Same key set on every row (PostgREST bulk insert): the one row with source
+    // columns goes in its own request so ordinary rows never name those columns.
+    const batch = queue.splice(0, 100);
+    const shape = (r, cols) => { const o = {}; cols.forEach((c) => (o[c] = r[c] ?? null)); return o; };
+    const plain = batch.filter((r) => !('landing' in r)).map((r) => shape(r, COLS));
+    const sourced = batch.filter((r) => 'landing' in r).map((r) => shape(r, [...COLS, ...SOURCE_COLS]));
     if (queue.length) timer = setTimeout(flush, 1000);
+    if (sourced.length) post(sourced);
+    if (plain.length) post(plain);
+  } catch (_) {}
+}
+
+function post(rows) {
+  try {
     fetch(ENDPOINT, {
       method: 'POST',
       keepalive: true,
