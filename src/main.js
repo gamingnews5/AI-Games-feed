@@ -8,6 +8,7 @@ import {
 import * as analytics from './analytics.js';
 import * as admin from './admin.js';
 import * as reports from './reports.js';
+import * as commentsApi from './comments.js';
 import { MEDIA_BASE } from './catalog-config.js';
 import { searchGames, queryWords } from './search.js';
 import { siteFor, isKnownHost, gameCanonicalUrl, MAIN_ORIGIN } from './sites.js';
@@ -23,6 +24,11 @@ const toastEl = document.getElementById('toast');
 const commentsSheetEl = document.getElementById('commentsSheet');
 const commentsListEl = document.getElementById('commentsList');
 const commentsTitleEl = document.getElementById('commentsTitle');
+const commentsComposerEl = document.getElementById('commentsComposer');
+const commentsInputEl = document.getElementById('commentsInput');
+const commentsCounterEl = document.getElementById('commentsCounter');
+const commentsSendEl = document.getElementById('commentsSend');
+const commentsErrorEl = document.getElementById('commentsError');
 
 const SORT_KEY = 'opus-feed-sort';
 const MOBILE_KEY = 'opus-feed-mobile-only';
@@ -114,6 +120,10 @@ let commentsOpen = false;
 let commentsSwipeStartY = null;
 let commentsSwipeCurrentY = 0;
 let commentsSwipeActive = false;
+let commentsGame = null;
+let commentsLoadToken = 0;
+const serverComments = new Map();
+const serverCommentCounts = new Map();
 /** Play origins/URLs already given navigation hints during this page session. */
 const warmedPlayOrigins = new Set();
 const warmedPlayUrls = new Set();
@@ -1798,16 +1808,20 @@ function commentsOf(game) {
   return game.comments.filter((c) => c && typeof c === 'object');
 }
 
+function serverCommentsOf(game) {
+  return serverComments.get(String(game?.id)) || [];
+}
+
 /**
- * Bubble count: the catalog's real reply/comment total on the source post
- * (comment_count). The fetched sample can include nested replies, so never
- * show fewer than the comments we actually have. 0 only when no data.
+ * Bubble count is never lower than the catalog sample. Once the feed endpoint
+ * answers, its count is included so a just-posted comment updates every rail.
  */
 function commentCount(game) {
   const listed = commentsOf(game).length;
   const n = Number(game?.comment_count);
-  const total = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
-  return Math.max(total, listed);
+  const catalog = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+  const remote = serverCommentCounts.get(String(game?.id));
+  return Math.max(catalog, listed, Number.isFinite(remote) ? remote : 0);
 }
 
 /** Prefer local /avatars path from Overheard; else initials (no remote hotlink). */
@@ -1818,15 +1832,18 @@ function resolveCommentAvatarUrl(comment) {
 }
 
 function sortedComments(game) {
-  return commentsOf(game)
+  const remote = serverCommentsOf(game)
     .slice()
-    .sort((a, b) => (Number(b.likes) || 0) - (Number(a.likes) || 0));
+    .sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0));
+  const local = commentsOf(game).slice().sort((a, b) => (Number(b.likes) || 0) - (Number(a.likes) || 0));
+  const seen = new Set(remote.map((c) => String(c.id || '')).filter(Boolean));
+  return remote.concat(local.filter((c) => !c.id || !seen.has(String(c.id))));
 }
 
 function commentRowHtml(comment) {
   const author = String(comment.author || 'anon').replace(/^@/, '').trim() || 'anon';
   const display = `@${author}`;
-  const text = String(comment.text || '').trim();
+  const text = String(comment.body ?? comment.text ?? '').trim();
   const likes = Math.max(0, Math.floor(Number(comment.likes) || 0));
   const initials = initialsFrom(author);
   const hue = hueFrom(author);
@@ -1837,8 +1854,9 @@ function commentRowHtml(comment) {
     : `<span class="cmt-avatar-fallback" style="--hue:${hue}" aria-hidden="true">${escapeHtml(initials)}</span>`;
   const url = typeof comment.url === 'string' ? comment.url.trim() : '';
   const safeUrl = url && httpUrl(url) ? url : '';
-  const openAttrs = safeUrl
-    ? ` role="link" tabindex="0" data-url="${escapeHtml(safeUrl)}"`
+  const openAttrs = safeUrl ? ` role="link" tabindex="0" data-url="${escapeHtml(safeUrl)}"` : '';
+  const deleteButton = comment.is_own && comment.id
+    ? `<button type="button" class="cmt-delete" data-comment-delete="${escapeHtml(comment.id)}" aria-label="Delete comment">Delete</button>`
     : '';
   return `
     <div class="cmt-row${safeUrl ? ' cmt-row-link' : ''}"${openAttrs}>
@@ -1846,7 +1864,7 @@ function commentRowHtml(comment) {
       <div class="cmt-body">
         <div class="cmt-meta">
           <span class="cmt-author">${escapeHtml(display)}</span>
-          <span class="cmt-likes" aria-label="${likes} likes">♥ ${escapeHtml(formatCompact(likes))}</span>
+          <span class="cmt-actions">${likes ? `<span class="cmt-likes" aria-label="${likes} likes">♥ ${escapeHtml(formatCompact(likes))}</span>` : ''}${deleteButton}</span>
         </div>
         <p class="cmt-text">${escapeHtml(text) || '<span class="cmt-empty-text">…</span>'}</p>
       </div>
@@ -1887,21 +1905,105 @@ function renderCommentsList(game) {
     });
   });
   commentsListEl.querySelectorAll('.cmt-row-link').forEach((row) => {
-    const open = () => {
-      const u = row.dataset.url;
-      if (u) window.open(u, '_blank', 'noopener,noreferrer');
-    };
-    row.addEventListener('click', (e) => {
-      e.stopPropagation();
-      open();
-    });
-    row.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        open();
-      }
-    });
+    const open = () => { const u = row.dataset.url; if (u) window.open(u, '_blank', 'noopener,noreferrer'); };
+    row.addEventListener('click', (e) => { if (e.target.closest('[data-comment-delete]')) return; e.stopPropagation(); open(); });
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
   });
+  commentsListEl.querySelectorAll('[data-comment-delete]').forEach((button) => {
+    button.addEventListener('click', (e) => { e.stopPropagation(); deleteOwnComment(button.dataset.commentDelete); });
+  });
+}
+
+function updateCommentRail(gameId) {
+  const text = formatCompact(commentCount(allGames.find((g) => String(g.id) === String(gameId)) || { id: gameId }));
+  document.querySelectorAll(`.card[data-id="${CSS.escape(String(gameId))}"] .rail-btn.comments .comment-count`).forEach((el) => { el.textContent = text; });
+}
+
+function setCommentsComposerVisible(visible) {
+  if (!commentsComposerEl) return;
+  commentsComposerEl.hidden = !visible;
+  if (!visible) {
+    commentsInputEl && (commentsInputEl.value = '');
+    commentsErrorEl && (commentsErrorEl.textContent = '');
+  }
+}
+
+function syncCommentsComposer() {
+  if (!commentsInputEl || !commentsSendEl) return;
+  const n = commentsInputEl.value.length;
+  if (commentsCounterEl) commentsCounterEl.textContent = `${n}/500`;
+  commentsSendEl.disabled = !commentsInputEl.value.trim() || !commentsGame;
+}
+
+function showCommentError(text) {
+  if (commentsErrorEl) commentsErrorEl.textContent = text || '';
+}
+
+async function loadServerComments(game, token) {
+  try {
+    const result = await commentsApi.fetchComments(game.id);
+    if (!commentsOpen || token !== commentsLoadToken || !commentsGame || String(commentsGame.id) !== String(game.id)) return;
+    serverComments.set(String(game.id), result.comments);
+    serverCommentCounts.set(String(game.id), result.count);
+      setCommentsComposerVisible(true);
+    renderCommentsList(game);
+    if (commentsTitleEl) commentsTitleEl.textContent = commentCount(game) ? `Comments · ${formatCompact(commentCount(game))}` : 'Comments';
+    updateCommentRail(game.id);
+  } catch (_) {
+    // A missing or not-yet-live endpoint deliberately leaves the old read-only UI.
+  }
+}
+
+async function sendComment() {
+  if (!commentsGame || !commentsInputEl || !commentsSendEl || commentsSendEl.disabled) return;
+  const game = commentsGame;
+  const body = commentsInputEl.value.trim().slice(0, 500);
+  if (!body) return;
+  const key = String(game.id);
+  const optimistic = { id: `pending-${Date.now()}`, author: 'you', body, text: body, created_at: new Date().toISOString(), is_own: true };
+  const previous = serverComments.get(key) || [];
+  serverComments.set(key, [optimistic, ...previous]);
+  serverCommentCounts.set(key, Math.max(commentCount(game), (serverCommentCounts.get(key) || 0) + 1));
+  commentsInputEl.value = '';
+  syncCommentsComposer();
+  renderCommentsList(game);
+  updateCommentRail(game.id);
+  commentsSendEl.disabled = true;
+  showCommentError('');
+  try {
+    const posted = await commentsApi.postComment(game.id, body, analytics.visitorId());
+    const current = serverComments.get(key) || [];
+    serverComments.set(key, current.map((c) => c.id === optimistic.id ? (posted || { ...optimistic, id: `comment-${Date.now()}` }) : c));
+    renderCommentsList(game);
+  } catch (error) {
+    serverComments.set(key, (serverComments.get(key) || []).filter((c) => c.id !== optimistic.id));
+    serverCommentCounts.set(key, Math.max(0, (serverCommentCounts.get(key) || 1) - 1));
+    renderCommentsList(game);
+    updateCommentRail(game.id);
+    showCommentError(error?.status === 429 ? 'Slow down' : "Couldn't send comment");
+  } finally {
+    syncCommentsComposer();
+  }
+}
+
+async function deleteOwnComment(commentId) {
+  if (!commentsGame || !commentId) return;
+  const game = commentsGame;
+  const key = String(game.id);
+  const previous = serverComments.get(key) || [];
+  const removed = previous.find((c) => String(c.id) === String(commentId));
+  if (!removed) return;
+  serverComments.set(key, previous.filter((c) => String(c.id) !== String(commentId)));
+  serverCommentCounts.set(key, Math.max(0, (serverCommentCounts.get(key) || 1) - 1));
+  renderCommentsList(game); updateCommentRail(game.id);
+  try {
+    await commentsApi.deleteComment(game.id, commentId);
+  } catch (_) {
+    serverComments.set(key, [removed, ...(serverComments.get(key) || [])]);
+    serverCommentCounts.set(key, (serverCommentCounts.get(key) || 0) + 1);
+    renderCommentsList(game); updateCommentRail(game.id);
+    showCommentError("Couldn't delete comment");
+  }
 }
 
 function setCommentsSheetOffset(py) {
@@ -1915,45 +2017,45 @@ function setCommentsSheetOffset(py) {
 
 function openCommentsSheet(game) {
   if (!commentsSheetEl || !commentsListEl) return;
+  commentsGame = game;
+  commentsLoadToken += 1;
+  const token = commentsLoadToken;
   commentsOpen = true;
   autoAdvancePaused = true;
   const n = commentCount(game);
-  if (commentsTitleEl) {
-    commentsTitleEl.textContent = n ? `Comments · ${formatCompact(n)}` : 'Comments';
-  }
+  if (commentsTitleEl) commentsTitleEl.textContent = n ? `Comments · ${formatCompact(n)}` : 'Comments';
+  setCommentsComposerVisible(false);
   renderCommentsList(game);
   commentsSheetEl.hidden = false;
   commentsSheetEl.setAttribute('aria-hidden', 'false');
   document.body.classList.add('comments-open');
   setCommentsSheetOffset(0);
-  // Next frame for enter animation
-  requestAnimationFrame(() => {
-    commentsSheetEl.classList.add('open');
-  });
+  requestAnimationFrame(() => commentsSheetEl.classList.add('open'));
   pushOverlayHistory('comments');
+  syncCommentsKeyboard();
+  loadServerComments(game, token);
 }
 
 function closeCommentsSheet() {
   if (!commentsSheetEl || !commentsOpen) return;
   commentsOpen = false;
+  commentsLoadToken += 1;
+  commentsGame = null;
   commentsSheetEl.classList.remove('open');
   document.body.classList.remove('comments-open');
   setCommentsSheetOffset(0);
+  commentsSheetEl.style.removeProperty('--kb');
   commentsSheetEl.setAttribute('aria-hidden', 'true');
+  commentsInputEl?.blur();
   const panel = commentsSheetEl.querySelector('.comments-panel');
   const done = () => {
     if (commentsOpen) return;
     commentsSheetEl.hidden = true;
     if (commentsListEl) commentsListEl.innerHTML = '';
-    // Resume auto-advance eligibility for the active card.
+    setCommentsComposerVisible(false);
     autoAdvancePaused = false;
   };
-  if (panel) {
-    panel.addEventListener('transitionend', done, { once: true });
-    setTimeout(done, 320);
-  } else {
-    done();
-  }
+  if (panel) { panel.addEventListener('transitionend', done, { once: true }); setTimeout(done, 320); } else done();
 }
 
 /* ---- Create a game sheet (bottom ＋) → omgithub.com composer ---- */
@@ -2014,7 +2116,7 @@ function wireAppKeyboard() {
   const syncAppH = () => {
     const px = window.innerHeight;
     const kbBusy = kbPx() > 0 || root.classList.contains('kb-anim');
-    if (px < lastPx && (createOpen || reportSheetOpen) && kbBusy) return;
+    if (px < lastPx && (createOpen || reportSheetOpen || commentsOpen) && kbBusy) return;
     const h = `${px}px`;
     lastPx = px;
     if (h !== lastH) { lastH = h; root.style.setProperty('--app-h', h); }
@@ -2301,6 +2403,8 @@ function wireCreateSheet() {
 
 function wireCommentsSheet() {
   if (!commentsSheetEl) return;
+  commentsInputEl?.addEventListener('input', syncCommentsComposer);
+  commentsComposerEl?.addEventListener('submit', (e) => { e.preventDefault(); sendComment(); });
   commentsSheetEl.querySelectorAll('[data-close-comments]').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -3842,6 +3946,25 @@ function applyFreshCatalog(data) {
     if (g.play_url && card.dataset.url !== g.play_url) card.dataset.url = g.play_url;
     if (typeof g.iframe === 'boolean') card.dataset.iframe = String(g.iframe);
     else delete card.dataset.iframe;
+  }
+}
+
+let commentsKbWired = false;
+function syncCommentsKeyboard() {
+  if (!commentsSheetEl) return;
+  if (appKbOn) { commentsSheetEl.style.removeProperty('--kb'); return; }
+  const vv = window.visualViewport;
+  const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+  commentsSheetEl.style.setProperty('--kb', `${Math.round(kb)}px`);
+  if (!commentsKbWired) {
+    commentsKbWired = true;
+    const on = () => { if (commentsOpen) syncCommentsKeyboard(); };
+    vv?.addEventListener('resize', on);
+    vv?.addEventListener('scroll', on);
+    commentsSheetEl.addEventListener('focusin', (e) => {
+      if (!e.target.matches('textarea, input')) return;
+      setTimeout(() => { syncCommentsKeyboard(); e.target.scrollIntoView({ block: 'nearest' }); }, 300);
+    });
   }
 }
 

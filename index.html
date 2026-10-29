@@ -56,7 +56,7 @@
     </a>
     <div class="hint hide" id="hint">Swipe down ↓</div>
     <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
-    <div id="commentsSheet" class="comments-sheet" hidden aria-hidden="true">
+    <div id="commentsSheet" class="comments-sheet comments-write-sheet" hidden aria-hidden="true">
       <div class="comments-backdrop" data-close-comments></div>
       <div class="comments-panel" role="dialog" aria-modal="true" aria-labelledby="commentsTitle">
         <div class="comments-grab" aria-hidden="true"><span class="comments-handle"></span></div>
@@ -65,6 +65,13 @@
           <button type="button" class="comments-close" aria-label="Close comments" data-close-comments>&times;</button>
         </header>
         <div class="comments-list" id="commentsList"></div>
+        <form id="commentsComposer" class="comments-composer" hidden autocomplete="off">
+          <div class="comments-compose-row">
+            <textarea id="commentsInput" class="comments-input" maxlength="500" rows="2" placeholder="Write a comment…" aria-label="Write a comment" enterkeyhint="send"></textarea>
+            <button type="submit" id="commentsSend" class="comments-send" disabled>Send</button>
+          </div>
+          <div class="comments-compose-meta"><span id="commentsError" class="comments-error" role="status" aria-live="polite"></span><span id="commentsCounter">0/500</span></div>
+        </form>
       </div>
     </div>
     <div id="createSheet" class="comments-sheet create-sheet" hidden aria-hidden="true">
