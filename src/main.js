@@ -685,7 +685,9 @@ function publicUrlFor(id = '', { liked = false } = {}) {
 }
 
 function shareUrlFor(id) {
-  return publicUrlFor(id).toString();
+  const u = publicUrlFor(id);
+  u.searchParams.set('ref', 'share');
+  return u.toString();
 }
 
 /**
