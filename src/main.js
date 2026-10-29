@@ -1934,7 +1934,12 @@ function closeCommentsSheet() {
 }
 
 /* ---- Create a game sheet (bottom ＋) → omgithub.com composer ---- */
-const CREATE_ORIGIN = 'https://omgithub.com/';
+/* AiGameMaker app users (UA or android.omgithub.com host) go to the app's own create
+ * site; web keeps omgithub.com. Both auto-start only when document.referrer's origin is
+ * the feed (android./games.omgithub.com), so never add noreferrer to this navigation. */
+const WEB_CREATE_ORIGIN = 'https://omgithub.com/';
+const APP_CREATE_ORIGIN = 'https://android-create.omgithub.com/';
+const CREATE_ORIGIN = inAiGameMakerApp() ? APP_CREATE_ORIGIN : WEB_CREATE_ORIGIN;
 const createSheetEl = document.getElementById('createSheet');
 const createPromptEl = document.getElementById('createPrompt');
 const createSendEl = document.getElementById('createSend');
@@ -2041,7 +2046,8 @@ function warmOmgithub() {
     omgithubConnectAt = now;
     addHeadLink('preconnect', CREATE_ORIGIN.replace(/\/$/, ''));
   }
-  if (omgithubAssetsWarmed || !sameSiteAsOmgithub) return;
+  // omgithub-preload.json lists omgithub.com's build assets; skip it for the app site.
+  if (omgithubAssetsWarmed || !sameSiteAsOmgithub || CREATE_ORIGIN !== WEB_CREATE_ORIGIN) return;
   omgithubAssetsWarmed = true;
   fetch('/omgithub-preload.json', { credentials: 'omit' })
     .then((r) => (r.ok ? r.json() : null))
@@ -2124,6 +2130,9 @@ function dismissCreateSheet() {
 function wireCreateSheet() {
   const btn = document.getElementById('createGame');
   if (!btn || !createSheetEl || !createPromptEl || !createSendEl) return;
+  // Static hrefs in index.html point at omgithub.com; app users get the app create site.
+  btn.href = CREATE_ORIGIN;
+  syncCreateSend();
   btn.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
