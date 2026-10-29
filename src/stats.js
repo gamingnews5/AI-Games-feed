@@ -75,6 +75,7 @@ function render(d) {
   list('zero', d.zero_searches_7d, (r) => `<span class="name">${esc(r.q)}</span><span class="num"><b>${fmt(r.n)}</b>×</span>`);
   list('searches', d.top_searches_7d, (r) => `<span class="name"><a href="/?search=${encodeURIComponent(r.q)}" target="_blank" rel="noopener">${esc(r.q)}</a></span><span class="num"><b>${fmt(r.n)}</b>× · ${fmt(r.results)} results</span>`);
   list('tags', d.top_tags_7d, (r) => `<span class="name"><a href="/?tag=${encodeURIComponent(r.tag)}" target="_blank" rel="noopener">${esc(r.tag)}</a></span><span class="num"><b>${fmt(r.n)}</b> taps</span>`);
+  list('sources', d.sources_7d, (r) => `<span class="name">${esc(r.source || '(direct)')}</span><span class="num"><b>${fmt(r.visits)}</b> visits · ${fmt(r.sessions)} sessions · ${fmt(r.plays)} plays · ${fmt(r.likes)} likes</span>`);
   list('daily', (d.daily_30d || []).slice().reverse(), (r) => `<span class="name">${esc(new Date(r.d).toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span><span class="num"><b>${fmt(r.views)}</b> views · <b>${fmt(r.plays)}</b> plays</span>`);
 }
 

@@ -36,3 +36,4 @@ h2 small { color:var(--muted); font-weight:400; margin-left:4px; }
 .legend span::before { content:''; display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:5px; }
 .legend .lv::before { background:rgba(124,92,255,.55); }
 .legend .lp::before { background:var(--play); }
+.grid .card.span-all { grid-column: 1 / -1; }
