@@ -6,6 +6,17 @@ const COMMENTS_ORIGIN = new URL(REPORTS_URL).origin;
 const TIMEOUT_MS = 8000;
 const signal = () => (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(TIMEOUT_MS) : undefined);
 
+/** Shared omgithub session only exists on *.omgithub.com feed hosts. */
+export function canSignIn() {
+  const host = window.location.hostname;
+  return host === 'games.omgithub.com' || host === 'android.omgithub.com' || host === 'localhost' || host === '127.0.0.1';
+}
+
+/** omgithub's GitHub sign-in. returnTo is the feed URL of this game (server must allowlist feed origins to honor it). */
+export function signInUrl(returnUrl) {
+  return `${COMMENTS_ORIGIN}/auth/github?returnTo=${encodeURIComponent(returnUrl)}`;
+}
+
 function credentials() {
   const host = window.location.hostname;
   return host === 'games.omgithub.com' || host === 'android.omgithub.com' ? 'include' : 'omit';
@@ -50,12 +61,12 @@ export async function fetchComments(gameId) {
   return { comments, count: Number.isFinite(n) && n >= 0 ? Math.floor(n) : comments.length };
 }
 
-export async function postComment(gameId, body, visitor) {
+export async function postComment(gameId, body) {
   const clean = String(body || '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ' ').trim().slice(0, 500);
   const data = await request(urlFor(gameId), {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body: clean, visitor: String(visitor || '').slice(0, 64) }),
+    body: JSON.stringify({ body: clean }),
   });
   return normalize(data?.comment || data);
 }

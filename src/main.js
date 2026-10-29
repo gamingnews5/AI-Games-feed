@@ -29,6 +29,8 @@ const commentsInputEl = document.getElementById('commentsInput');
 const commentsCounterEl = document.getElementById('commentsCounter');
 const commentsSendEl = document.getElementById('commentsSend');
 const commentsErrorEl = document.getElementById('commentsError');
+const commentsSigninEl = document.getElementById('commentsSignin');
+const commentsSigninLinkEl = document.getElementById('commentsSigninLink');
 
 const SORT_KEY = 'opus-feed-sort';
 const MOBILE_KEY = 'opus-feed-mobile-only';
@@ -1919,9 +1921,15 @@ function updateCommentRail(gameId) {
   document.querySelectorAll(`.card[data-id="${CSS.escape(String(gameId))}"] .rail-btn.comments .comment-count`).forEach((el) => { el.textContent = text; });
 }
 
-function setCommentsComposerVisible(visible) {
+/** mode: 'none' (read-only), 'compose' (signed in), 'signin' (guest on an omgithub host). */
+function setCommentsComposerVisible(mode) {
   if (!commentsComposerEl) return;
+  const visible = mode === 'compose';
   commentsComposerEl.hidden = !visible;
+  if (commentsSigninEl) commentsSigninEl.hidden = mode !== 'signin';
+  if (mode === 'signin' && commentsSigninLinkEl && commentsGame) {
+    commentsSigninLinkEl.href = commentsApi.signInUrl(historyUrlFor(commentsGame.id));
+  }
   if (!visible) {
     commentsInputEl && (commentsInputEl.value = '');
     commentsErrorEl && (commentsErrorEl.textContent = '');
@@ -1945,7 +1953,11 @@ async function loadServerComments(game, token) {
     if (!commentsOpen || token !== commentsLoadToken || !commentsGame || String(commentsGame.id) !== String(game.id)) return;
     serverComments.set(String(game.id), result.comments);
     serverCommentCounts.set(String(game.id), result.count);
-      setCommentsComposerVisible(true);
+    if (commentsApi.canSignIn()) {
+      const me = await admin.fetchMe();
+      if (!commentsOpen || token !== commentsLoadToken) return;
+      setCommentsComposerVisible(me.signedIn ? 'compose' : 'signin');
+    }
     renderCommentsList(game);
     if (commentsTitleEl) commentsTitleEl.textContent = commentCount(game) ? `Comments · ${formatCompact(commentCount(game))}` : 'Comments';
     updateCommentRail(game.id);
@@ -1971,7 +1983,7 @@ async function sendComment() {
   commentsSendEl.disabled = true;
   showCommentError('');
   try {
-    const posted = await commentsApi.postComment(game.id, body, analytics.visitorId());
+    const posted = await commentsApi.postComment(game.id, body);
     const current = serverComments.get(key) || [];
     serverComments.set(key, current.map((c) => c.id === optimistic.id ? (posted || { ...optimistic, id: `comment-${Date.now()}` }) : c));
     renderCommentsList(game);
@@ -1980,7 +1992,9 @@ async function sendComment() {
     serverCommentCounts.set(key, Math.max(0, (serverCommentCounts.get(key) || 1) - 1));
     renderCommentsList(game);
     updateCommentRail(game.id);
-    showCommentError(error?.status === 429 ? 'Slow down' : "Couldn't send comment");
+    if (error?.status === 401) { setCommentsComposerVisible('signin'); return; }
+    const serverText = typeof error?.data?.error === 'string' ? error.data.error.slice(0, 140) : '';
+    showCommentError(error?.status === 429 ? 'Slow down' : (error?.status === 400 || error?.status === 403) && serverText ? serverText : "Couldn't send comment");
   } finally {
     syncCommentsComposer();
   }
@@ -2024,7 +2038,7 @@ function openCommentsSheet(game) {
   autoAdvancePaused = true;
   const n = commentCount(game);
   if (commentsTitleEl) commentsTitleEl.textContent = n ? `Comments · ${formatCompact(n)}` : 'Comments';
-  setCommentsComposerVisible(false);
+  setCommentsComposerVisible('none');
   renderCommentsList(game);
   commentsSheetEl.hidden = false;
   commentsSheetEl.setAttribute('aria-hidden', 'false');
@@ -2052,7 +2066,7 @@ function closeCommentsSheet() {
     if (commentsOpen) return;
     commentsSheetEl.hidden = true;
     if (commentsListEl) commentsListEl.innerHTML = '';
-    setCommentsComposerVisible(false);
+    setCommentsComposerVisible('none');
     autoAdvancePaused = false;
   };
   if (panel) { panel.addEventListener('transitionend', done, { once: true }); setTimeout(done, 320); } else done();

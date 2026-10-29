@@ -1005,7 +1005,9 @@ body.comments-open .feed {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   background: #161616;
 }
-.comments-composer[hidden] { display: none !important; }
+.comments-composer[hidden], .comments-signin[hidden] { display: none !important; }
+.comments-signin { flex: 0 0 auto; display: flex; justify-content: center; padding: 10px 12px max(10px, env(safe-area-inset-bottom, 0px)); border-top: 1px solid rgba(255,255,255,0.08); }
+.comments-signin-btn { border-radius: 999px; padding: 8px 16px; background: rgba(255,255,255,0.1); color: #fff; font-size: 13px; font-weight: 700; text-decoration: none; }
 .comments-compose-row { display: flex; align-items: flex-end; gap: 8px; }
 .comments-input {
   flex: 1 1 auto;
