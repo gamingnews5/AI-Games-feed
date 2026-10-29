@@ -1672,3 +1672,27 @@ html.is-admin .toast { z-index: 60; }
 }
 .game-page-link:hover,
 .game-page-link:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Broken-game reports */
+.play-row { display: flex; align-items: center; gap: 12px; align-self: flex-start; }
+.play-row .play { align-self: auto; }
+.report-btn { appearance: none; border: none; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; padding: 12px 6px 6px; cursor: pointer; opacity: 0.75; }
+.report-btn:hover { opacity: 1; color: #fff; }
+.broken-badge { background: #d33 !important; color: #fff !important; font-weight: 700; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+.report-desc { display: block; -webkit-line-clamp: unset; max-width: 46ch; }
+.report-desc p { margin: 2px 0; font-size: 13px; line-height: 1.35; }
+.report-head { color: #ffb4b4; font-weight: 700; }
+.report-line { color: #eee; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-more { color: var(--muted); }
+.report-body { display: flex; flex-direction: column; gap: 12px; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); }
+.report-reasons { display: flex; flex-wrap: wrap; gap: 8px; }
+.report-text { width: 100%; box-sizing: border-box; resize: none; border-radius: 12px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); color: #fff; padding: 10px 12px; font: inherit; font-size: 16px; }
+.report-send { align-self: flex-end; appearance: none; border: none; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 700; padding: 10px 24px; cursor: pointer; }
+.report-send:disabled { opacity: 0.5; }
+.admin-broken-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.admin-broken.on { background: #d33; border-color: #d33; color: #fff; }
+.admin-report-count { font-size: 13px; color: var(--muted); }
+.admin-reports-link { margin-left: auto; font-size: 13px; color: var(--accent); }
+.reports-chip { display: none; }
+.is-admin .reports-chip { display: inline-flex; }
+.reports-chip.active { background: #d33; color: #fff; }

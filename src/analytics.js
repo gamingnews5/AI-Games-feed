@@ -220,3 +220,15 @@ export function trackSearch(q, resultCount) {
 }
 
 init();
+
+/** Stable per-device id (feed.visitor), created on demand even when analytics is off. */
+export function visitorId() {
+  if (visitor) return visitor;
+  try {
+    let v = localStorage.getItem('feed.visitor') || '';
+    if (!v) { v = rid(); localStorage.setItem('feed.visitor', v); }
+    return (visitor = v);
+  } catch (_) {
+    return '';
+  }
+}

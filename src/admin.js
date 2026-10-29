@@ -103,9 +103,9 @@ export function cleanRating(raw) {
 /** One override entry → { admin_rating|null, tags|null, updated_at } or null if it overrides nothing. */
 function cleanEntry(o) {
   if (!o || typeof o !== 'object') return null;
-  const e = { admin_rating: cleanRating(o.admin_rating), tags: cleanTags(o.tags), play_url: cleanPlayUrl(o.play_url), updated_at: o.updated_at || null };
+  const e = { admin_rating: cleanRating(o.admin_rating), tags: cleanTags(o.tags), play_url: cleanPlayUrl(o.play_url), broken: o.broken === true || null, updated_at: o.updated_at || null };
   if (e.tags && e.updated_at && Date.parse(e.updated_at) < LEGACY_TAGS_BEFORE) e.legacy = true;
-  return e.admin_rating == null && !e.tags && !e.play_url ? null : e;
+  return e.admin_rating == null && !e.tags && !e.play_url && !e.broken ? null : e;
 }
 
 /** { game_id: entry } from the GET response (or a bare map); null if unusable. */
@@ -201,8 +201,10 @@ function baseOf(g) {
 
 /** g.admin_tags = the card's full chip list (override); absent = chips derived from the catalog.
  *  A legacy override only replaces the catalog tags (g.tags). */
-function setFields(g, rating, tags, legacyTags = null, playUrl = null) {
+function setFields(g, rating, tags, legacyTags = null, playUrl = null, broken = null) {
   const base = baseOf(g);
+  if (broken) g.broken = true;
+  else delete g.broken;
   // Override Play link (all viewers); none → the catalog link.
   if (playUrl) {
     g.play_url = playUrl;
@@ -224,9 +226,9 @@ function setFields(g, rating, tags, legacyTags = null, playUrl = null) {
 function fieldsFrom(g, o) {
   const base = baseOf(g);
   const legacy = !!(o?.legacy && o.tags);
-  return { admin_rating: o?.admin_rating ?? base.admin_rating, tags: legacy ? null : o?.tags || null, legacyTags: legacy ? o.tags : null, play_url: o?.play_url || null };
+  return { admin_rating: o?.admin_rating ?? base.admin_rating, tags: legacy ? null : o?.tags || null, legacyTags: legacy ? o.tags : null, play_url: o?.play_url || null, broken: o?.broken === true || null };
 }
-const state = (g) => JSON.stringify([g.admin_rating ?? null, g.tags || null, g.admin_tags || null, g.play_url || null]);
+const state = (g) => JSON.stringify([g.admin_rating ?? null, g.tags || null, g.admin_tags || null, g.play_url || null, !!g.broken]);
 
 /**
  * Apply overrides (default: the latest server map) on top of catalog games, in place.
@@ -244,7 +246,7 @@ export function applyOverrides(games, overrides) {
     if (!o && !e && !g.__adminBase) continue;
     const f = e ? e.fields : fieldsFrom(g, o);
     const before = state(g);
-    setFields(g, f.admin_rating, f.tags, f.legacyTags, f.play_url);
+    setFields(g, f.admin_rating, f.tags, f.legacyTags, f.play_url, f.broken);
     if (state(g) !== before) changed.push(g.id);
   }
   return changed;
@@ -261,10 +263,11 @@ export function setGameFields(g, fields) {
     // No chip list given (rating-only edit): keep whatever catalog/legacy tags show now.
     legacyTags: full ? null : g.tags ? g.tags.slice() : null,
     play_url: cleanPlayUrl(fields.play_url),
+    broken: fields.broken === true || null,
   };
   e.at = Date.now();
   local.set(g.id, e);
-  setFields(g, e.fields.admin_rating, e.fields.tags, e.fields.legacyTags, e.fields.play_url);
+  setFields(g, e.fields.admin_rating, e.fields.tags, e.fields.legacyTags, e.fields.play_url, e.fields.broken);
 }
 
 const ERROR_TOASTS = { 401: 'Sign in to omgithub', 403: 'Not allowed', 503: 'Edits paused' };
@@ -317,7 +320,7 @@ export async function saveGamePatch(g, patch) {
     e.at = Date.now();
     if (e.inflight === 0) {
       e.fields = saved;
-      setFields(g, saved.admin_rating, saved.tags, saved.legacyTags, saved.play_url);
+      setFields(g, saved.admin_rating, saved.tags, saved.legacyTags, saved.play_url, saved.broken);
     }
     persistLocal();
   }
@@ -361,6 +364,13 @@ function ensureSheet() {
           <button type="submit" class="admin-add-btn">Add</button>
         </form>
         <div class="admin-tags" role="group" aria-label="Tags"></div>
+        <div class="admin-label">Status</div>
+        <div class="admin-broken-row">
+          <button type="button" class="admin-chip admin-broken" data-admin-broken aria-pressed="false">Broken</button>
+          <span class="admin-report-count" data-admin-report-count></span>
+          <button type="button" class="admin-chip admin-fixed" data-admin-fixed hidden>Fixed: clear reports</button>
+          <a class="admin-reports-link" data-admin-reports-link href="?view=reports">Reports view</a>
+        </div>
         <div class="admin-label">Play link</div>
         <form class="admin-play" autocomplete="off" novalidate>
           <input class="admin-play-input" type="url" inputmode="url" enterkeyhint="done" maxlength="2048" placeholder="https://… (empty = catalog link)" aria-label="Play link" spellcheck="false" autocapitalize="off" />
@@ -421,6 +431,24 @@ function ensureSheet() {
     const cur = sheetState.tagsOf(sheetState.game);
     if (!cur.includes(t)) sheetState.onChange({ tags: [...cur, t] });
     else renderAdminSheet();
+  });
+  sheetEl.querySelector('[data-admin-broken]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!sheetState) return;
+    const was = !!sheetState.game.broken;
+    if (was) sheetState.justFixed = true; // offer "Fixed: clear reports" after un-marking
+    sheetState.onChange({ broken: was ? null : true });
+  });
+  sheetEl.querySelector('[data-admin-fixed]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!sheetState) return;
+    sheetState.justFixed = false;
+    sheetState.onClearReports?.(sheetState.game);
+  });
+  sheetEl.querySelector('[data-admin-reports-link]').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    sheetState?.onOpenReports?.();
   });
   sheetEl.querySelector('.admin-play').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -538,6 +566,12 @@ export function renderAdminSheet() {
   // Order is fixed when the sheet opens (no jumping under the finger).
   const order = sheetState.order || (sheetState.order = sheetOrder(tags, allTags));
   for (const t of tags) if (!order.includes(t)) order.push(t);
+  const brokenBtn = sheetEl.querySelector('[data-admin-broken]');
+  brokenBtn.classList.toggle('on', !!game.broken);
+  brokenBtn.setAttribute('aria-pressed', String(!!game.broken));
+  const reportN = sheetState.reportCount ? sheetState.reportCount(game) : 0;
+  sheetEl.querySelector('[data-admin-report-count]').textContent = reportN == null ? '' : `${reportN} ${reportN === 1 ? 'report' : 'reports'}`;
+  sheetEl.querySelector('[data-admin-fixed]').hidden = !(sheetState.justFixed && !game.broken && reportN > 0);
   const play = sheetEl.querySelector('.admin-play-input');
   if (document.activeElement !== play) {
     play.value = game.play_url_override ? game.play_url : '';

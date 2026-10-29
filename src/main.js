@@ -7,6 +7,7 @@ import {
 } from './feed-from-catalog.js';
 import * as analytics from './analytics.js';
 import * as admin from './admin.js';
+import * as reports from './reports.js';
 import { MEDIA_BASE } from './catalog-config.js';
 import { searchGames, queryWords } from './search.js';
 import { siteFor, isKnownHost, gameCanonicalUrl, MAIN_ORIGIN } from './sites.js';
@@ -634,10 +635,17 @@ function filterGames(games, mobileOnly) {
 }
 
 /** Sort by the current mode, then (when searching) exact matches before fuzzy ones. */
+/** Games anyone can see: admin-marked broken games are hidden for everyone (admins too). */
+function liveGames() {
+  return allGames.filter((g) => !g.broken);
+}
+
 function visibleGames(mode, mobileOnly) {
+  // Admin Reports view: reported + broken games, most reported first; no filters.
+  if (activeReports) return reports.sortReported(allGames.filter((g) => g.broken || reportsMap?.[g.id]), reportsMap || {});
   // Liked view: every liked game, ignoring tag / mobile / search filters.
-  if (activeLiked) return likedGamesOrdered(sortGames(allGames, mode));
-  const sorted = sortGames(filterGames(allGames, mobileOnly), mode);
+  if (activeLiked) return likedGamesOrdered(sortGames(liveGames(), mode));
+  const sorted = sortGames(filterGames(liveGames(), mobileOnly), mode);
   if (!searchWords(activeSearch).length) return sorted;
   return searchGames(sorted, activeSearch, searchFields).list;
 }
@@ -657,6 +665,7 @@ function publicUrlFor(id = '', { liked = false } = {}) {
   u.pathname = current.pathname;
   // ?liked=1 is per-device, so it goes in history URLs but never in share links.
   if (liked && activeLiked) u.searchParams.set('liked', '1');
+  if (liked && activeReports) u.searchParams.set('view', 'reports');
   if (activeTag) u.searchParams.set('tag', activeTag);
   if (activeSearch) u.searchParams.set('search', activeSearch);
   if (id) u.searchParams.set('g', id);
@@ -731,7 +740,15 @@ function onHistoryPop() {
   if (adminOpen && state.opus !== 'admin') {
     closeAdminEdit();
   }
+  if (reportSheetOpen && state.opus !== 'report') {
+    closeReportSheet();
+  }
   if (state.opus) return;
+  const urlReports = reportsViewFromUrl() && isAdmin;
+  if (urlReports !== activeReports) {
+    applyReportsView(urlReports, { fromHistory: true, landId: state.g || deepLinkIdFromUrl() });
+    return;
+  }
   const urlLiked = likedFromUrl();
   if (urlLiked !== activeLiked) {
     applyLikedFilter(urlLiked, { fromHistory: true, landId: state.g || deepLinkIdFromUrl() });
@@ -2737,6 +2754,11 @@ function overrideChipsHtml(game) {
 }
 
 function badgesHtml(game) {
+  if (game.broken) return `<span class="badge broken-badge">Broken</span>` + badgesHtmlBase(game);
+  return badgesHtmlBase(game);
+}
+
+function badgesHtmlBase(game) {
   if (Array.isArray(game.admin_tags)) {
     return `
         <span class="score">${escapeHtml(scoreLabel(game.admin_rating ?? game.screenshot_score))}</span>
@@ -2800,7 +2822,7 @@ function buildCard(game, index) {
     ? `<div class="poster-fill" aria-hidden="true" data-bg="${escapeHtml(game.screenshot)}"></div><img class="poster ken-burns" data-src="${escapeHtml(game.screenshot)}" alt="" decoding="async" draggable="false" />${loadSlidesHtml(game)}`
     : `<div class="poster poster-fallback ken-burns" aria-hidden="true"></div>`;
 
-  const desc = game.description
+  const desc = activeReports ? reportDescHtml(game) : game.description
     ? `<p class="desc">${escapeHtml(game.description)}</p>`
     : '';
 
@@ -2836,7 +2858,7 @@ function buildCard(game, index) {
       ${authorRowHtml(game)}
       <h2 class="title">${escapeHtml(game.title)}</h2>
       ${desc}
-      ${playOrDownloadHtml(game)}
+      <div class="play-row">${playOrDownloadHtml(game)}<button type="button" class="report-btn" aria-label="Report broken game" title="Report broken game">⚑ Report</button></div>
     </div>
     <div class="rail" aria-label="Actions">
       <button type="button" class="rail-btn like ${liked ? 'liked' : ''}" aria-pressed="${liked ? 'true' : 'false'}" aria-label="${liked ? 'Unlike' : 'Like'}">
@@ -2903,6 +2925,11 @@ function buildCard(game, index) {
     e.stopPropagation();
     analytics.track('comments', { game_id: game.id });
     openCommentsSheet(game);
+  });
+
+  card.querySelector('.report-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    openReport(game);
   });
 
   card.querySelector('.share').addEventListener('click', (e) => {
@@ -3272,7 +3299,7 @@ function wireKeyboard() {
   if (keyboardWired) return;
   keyboardWired = true;
   window.addEventListener('keydown', (e) => {
-    if (commentsOpen || createOpen) return;
+    if (commentsOpen || createOpen || reportSheetOpen || adminOpen) return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'j') {
       e.preventDefault();
       const current = currentIndexFromScroll();
@@ -3351,14 +3378,20 @@ function renderFeed(mode, mobileOnly, { restore = true, landId = '', ensureId = 
   // filter would hide it: pin it at the top of the filtered list.
   if (ensureId && !sorted.some((g) => g.id === ensureId)) {
     const linked = allGames.find((g) => g.id === ensureId);
-    if (linked) sorted = [linked, ...sorted];
+    if (linked && linked.broken && !activeReports) {
+      // A link to a broken game: normal start + a note instead of the dead game.
+      showToast('That game is unavailable right now');
+      if (landId === ensureId) landId = '';
+      restore = !activeTag && !activeLiked;
+    } else if (linked) sorted = [linked, ...sorted];
   }
   let games = sorted;
-  const resumeId = restore && !activeLiked ? resumeIdForGames(games) : '';
+  const listView = activeLiked || activeReports;
+  const resumeId = restore && !listView ? resumeIdForGames(games) : '';
   const anchorId = restore ? resumeId : landId;
   // Scroll up: already seen, oldest at the top. Scroll down: not yet seen.
   // Liked view keeps most-recently-liked order instead.
-  if (!activeLiked) games = orderSeenHistoryAbove(games, anchorId);
+  if (!listView) games = orderSeenHistoryAbove(games, anchorId);
   syncLikeTotal();
 
   tearDownVideos();
@@ -3369,6 +3402,11 @@ function renderFeed(mode, mobileOnly, { restore = true, landId = '', ensureId = 
     if (mode === SORT_NEW && sorted.length) {
       feedEl.innerHTML = '';
       feedEl.appendChild(buildEndCard());
+      return;
+    }
+    if (activeReports) {
+      feedEl.innerHTML = `<div class="empty liked-empty"><p>${reportsMap ? 'No reported or broken games' : 'Loading reports…'}</p><button type="button" class="filter-btn reports-exit">Back to feed</button></div>`;
+      feedEl.querySelector('.reports-exit')?.addEventListener('click', () => applyReportsView(false));
       return;
     }
     if (activeLiked) {
@@ -3405,7 +3443,7 @@ function renderFeed(mode, mobileOnly, { restore = true, landId = '', ensureId = 
   const targetId = restore ? resumeId : landId;
   const start = targetId
     ? resolveStartIndex(targetId)
-    : activeLiked
+    : listView
     ? 0
     : games.findIndex((g) => !readSeen()[g.id]);
   const startIndex = start > 0 ? start : 0;
@@ -3453,9 +3491,11 @@ const likedToggleEl = document.getElementById('likedToggle');
 
 function syncLikeTotal() {
   if (!countEl) return;
-  const videoCount = allGames.filter((g) => g.video).length;
+  const live = liveGames();
+  const videoCount = live.filter((g) => g.video).length;
+  const brokenN = allGames.length - live.length;
   const videoLabel = `${videoCount} ${videoCount === 1 ? 'video' : 'videos'}`;
-  countEl.textContent = `${catalogCount} games`;
+  countEl.textContent = `${Math.max(0, catalogCount - brokenN)} games`;
   countEl.title = videoLabel;
   countEl.dataset.tooltip = videoLabel;
 }
@@ -3524,7 +3564,7 @@ function applyTagFilter(tag, { fromHistory = false, landId = '' } = {}) {
     syncLikedUI();
   }
   syncTagUI();
-  const inTag = !next || allGames.some((g) => g.id === keepId && gameTags(g).includes(next));
+  const inTag = !next || liveGames().some((g) => g.id === keepId && gameTags(g).includes(next));
   const id = inTag ? keepId : '';
   if (!fromHistory) {
     try {
@@ -3796,6 +3836,145 @@ function applyFreshCatalog(data) {
   }
 }
 
+/* ---- Broken-game reports: ⚑ sheet for everyone, Reports view for admins ---- */
+let reportSheetOpen = false;
+let activeReports = false;
+let reportsMap = null; // admin only: { id: {count, last_at, texts} }
+let reportsLoading = null;
+// Captured before the first render rewrites the URL (admin status arrives later).
+let bootReportsView = (() => { try { return new URLSearchParams(window.location.search).get('view') === 'reports'; } catch (_) { return false; } })();
+
+function reportsViewFromUrl() {
+  try {
+    return new URLSearchParams(window.location.search).get('view') === 'reports';
+  } catch (_) {
+    return false;
+  }
+}
+
+function openReport(game) {
+  if (reports.hasReported(game.id)) {
+    showToast('Thanks — already reported');
+    return;
+  }
+  if (reportSheetOpen) return;
+  if (commentsOpen) closeCommentsSheet();
+  reportSheetOpen = true;
+  autoAdvancePaused = true;
+  const visitor = analytics.visitorId();
+  reports.openReportSheet({
+    game,
+    visitor,
+    onSent: (res) => {
+      dismissReport();
+      if (res.status === 400) showToast("Couldn't send report");
+      else {
+        showToast('Thanks — we will take a look');
+        analytics.track('report', { game_id: game.id });
+        if (isAdmin) loadReports(true);
+      }
+    },
+    onDismiss: dismissReport,
+  });
+  pushOverlayHistory('report');
+}
+
+function closeReportSheet() {
+  if (!reportSheetOpen) return;
+  reportSheetOpen = false;
+  reports.closeReportSheet();
+  autoAdvancePaused = false;
+}
+
+function dismissReport() {
+  if (history.state && history.state.opus === 'report') {
+    history.back();
+    return;
+  }
+  closeReportSheet();
+}
+
+function reportDescHtml(game) {
+  const r = reportsMap?.[game.id];
+  const { head, lines, more } = reports.reportLines(r);
+  return `<div class="desc report-desc"><p class="report-head">${escapeHtml(head)}</p>${lines
+    .map((l) => `<p class="report-line">“${escapeHtml(l)}”</p>`)
+    .join('')}${more ? `<p class="report-more">+${more} more</p>` : ''}</div>`;
+}
+
+let reportsChipEl = null;
+function ensureReportsChip() {
+  if (reportsChipEl || !isAdmin) return;
+  const anchor = document.getElementById('likedToggle');
+  if (!anchor) return;
+  reportsChipEl = document.createElement('button');
+  reportsChipEl.type = 'button';
+  reportsChipEl.id = 'reportsChip';
+  reportsChipEl.className = 'filter-btn reports-chip';
+  reportsChipEl.addEventListener('click', () => applyReportsView(!activeReports));
+  anchor.insertAdjacentElement('afterend', reportsChipEl);
+  syncReportsChip();
+}
+
+function syncReportsChip() {
+  if (!reportsChipEl) return;
+  const n = reportsMap ? Object.keys(reportsMap).length : 0;
+  const broken = allGames.filter((g) => g.broken && !reportsMap?.[g.id]).length;
+  reportsChipEl.textContent = activeReports ? 'Reports ✕' : `Reports (${reportsMap ? n + broken : '…'})`;
+  reportsChipEl.classList.toggle('active', activeReports);
+  reportsChipEl.setAttribute('aria-pressed', String(activeReports));
+}
+
+function loadReports(force = false) {
+  if (!isAdmin) return Promise.resolve(reportsMap);
+  if (reportsLoading && !force) return reportsLoading;
+  reportsLoading = reports.fetchReports().then((map) => {
+    reportsLoading = null;
+    if (map) reportsMap = map;
+    else if (!reportsMap) showToast("Couldn't load reports");
+    syncReportsChip();
+    if (admin.adminSheetGameId()) admin.renderAdminSheet();
+    return reportsMap;
+  });
+  return reportsLoading;
+}
+
+function applyReportsView(on, { fromHistory = false, landId = '' } = {}) {
+  const next = Boolean(on) && isAdmin;
+  if (next === activeReports) return;
+  const keepId = landId || currentGameId();
+  activeReports = next;
+  document.body.classList.toggle('reports-view', next);
+  syncReportsChip();
+  if (!fromHistory) {
+    try {
+      history.pushState({ g: keepId }, '', historyUrlFor(''));
+    } catch (_) {}
+  }
+  const draw = () => {
+    historySilent = true;
+    try {
+      renderFeed(readSortMode(), readMobileOnly(), { restore: !next && !keepId && !activeTag && !activeLiked, landId: keepId });
+    } finally {
+      historySilent = false;
+    }
+  };
+  draw();
+  if (next) loadReports(true).then(() => { if (activeReports) draw(); });
+}
+
+async function clearGameReports(game) {
+  const ok = await reports.clearReports(game.id);
+  if (!ok) {
+    showToast("Couldn't clear reports");
+    return;
+  }
+  if (reportsMap) delete reportsMap[game.id];
+  showToast('Reports cleared');
+  syncReportsChip();
+  if (admin.adminSheetGameId() === game.id) admin.renderAdminSheet();
+}
+
 /* ---- Admin: overrides for everyone, ✎ edit sheet for admins ---- */
 let isAdmin = false;
 let adminOpen = false;
@@ -3807,6 +3986,16 @@ function startAdminBoot() {
     // Patch cards in place (no re-sort, no scroll): the current card never jumps.
     const changed = admin.applyOverrides(allGames, map);
     changed.forEach(refreshCardMeta);
+    syncLikeTotal();
+    // A game just learned to be broken while on screen: redraw without it (normal feed only).
+    const onScreen = new Set([...cards()].map((c) => c.dataset.id));
+    if (!activeReports && changed.some((id) => onScreen.has(id) && allGames.find((g) => g.id === id)?.broken)) {
+      const cur = currentGameId();
+      const curBroken = allGames.find((g) => g.id === cur)?.broken;
+      if (curBroken && cur === deepLinkIdFromUrl()) showToast('That game is unavailable right now');
+      renderFeed(readSortMode(), readMobileOnly(), { restore: false, landId: curBroken ? '' : cur });
+      return;
+    }
     // A filter that matched nothing before the overrides (e.g. ?tag= of an admin-only tag): render now.
     if (changed.length && !cards().length && (activeTag || readMobileOnly())) {
       renderFeed(readSortMode(), readMobileOnly(), { restore: false, landId: deepLinkIdFromUrl() });
@@ -3817,6 +4006,13 @@ function startAdminBoot() {
     isAdmin = true;
     document.documentElement.classList.add('is-admin');
     cards().forEach(addAdminButton);
+    ensureReportsChip();
+    if (bootReportsView) {
+      bootReportsView = false;
+      applyReportsView(true, { fromHistory: true, landId: '' });
+      try { history.replaceState(history.state, '', historyUrlFor(currentGameId())); } catch (_) {}
+    }
+    else loadReports();
   });
 }
 
@@ -3850,7 +4046,7 @@ function adminAllTags() {
 }
 
 function adminSnapshot(game) {
-  return { admin_rating: game.admin_rating ?? null, tags: Array.isArray(game.admin_tags) ? game.admin_tags.slice() : null, play_url: game.play_url_override ? game.play_url : null };
+  return { admin_rating: game.admin_rating ?? null, tags: Array.isArray(game.admin_tags) ? game.admin_tags.slice() : null, play_url: game.play_url_override ? game.play_url : null, broken: game.broken ? true : null };
 }
 
 function openAdminEdit(id) {
@@ -3866,6 +4062,12 @@ function openAdminEdit(id) {
     tagsOf: chipTags,
     onChange: (patch) => adminEdit(game, patch),
     onDismiss: dismissAdminEdit,
+    reportCount: (g) => (reportsMap ? reportsMap[g.id]?.count || 0 : null),
+    onClearReports: (g) => clearGameReports(g),
+    onOpenReports: () => {
+      dismissAdminEdit();
+      setTimeout(() => applyReportsView(true), 0);
+    },
   });
   pushOverlayHistory('admin');
 }
@@ -3898,6 +4100,7 @@ function adminEdit(game, patch) {
     showToast(`Max ${admin.MAX_TAGS} tags`);
     return;
   }
+  if ('broken' in patch) showToast(patch.broken ? 'Marked broken — hidden from the feed' : 'Unmarked broken — back in the feed');
   admin.setGameFields(game, { ...adminSnapshot(game), ...patch });
   refreshCardMeta(game.id);
   admin.renderAdminSheet();
@@ -3912,6 +4115,7 @@ function adminEdit(game, patch) {
   const run = prev.then(() =>
     admin.saveGamePatch(game, patch).then((res) => {
       redraw();
+      syncLikeTotal();
       if (!res.ok) showToast(admin.saveErrorToast(res.status));
     }),
   );
