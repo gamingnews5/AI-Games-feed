@@ -37,3 +37,9 @@ h2 small { color:var(--muted); font-weight:400; margin-left:4px; }
 .legend .lv::before { background:rgba(124,92,255,.55); }
 .legend .lp::before { background:var(--play); }
 .grid .card.span-all { grid-column: 1 / -1; }
+.src-row { cursor:pointer; }
+.src-row:hover .name { color:var(--accent); }
+.src-row .caret { width:12px; color:var(--muted); font-size:11px; }
+.src-links { padding:0 0 4px 20px; }
+.row.sub { font-size:12px; padding:3px 0; }
+.row.sub .tagl { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.04em; }
