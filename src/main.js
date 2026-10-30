@@ -2275,6 +2275,14 @@ function dismissCreateSheet() {
   closeCreateSheet();
 }
 
+let plusPending = false;
+/** ＋ destination: signed in -> omgithub create page; Android browser guest -> Play; else the sheet. */
+function plusRoute(me, btn) {
+  if (me?.signedIn) { window.location.assign(CREATE_ORIGIN); return; }
+  if (ANDROID_BROWSER) { window.location.href = PLAY_INTENT_URL; return; }
+  btn.dispatchEvent(new Event('opus-plus-sheet'));
+}
+
 function wireCreateSheet() {
   const btn = document.getElementById('createGame');
   if (!btn || !createSheetEl || !createPromptEl || !createSendEl) return;
@@ -2285,11 +2293,20 @@ function wireCreateSheet() {
     e.preventDefault();
     e.stopPropagation();
     try { navigator.vibrate?.(10); } catch (_) {}
-    if (ANDROID_BROWSER) {
-      btn.classList.remove('glow');
-      window.location.href = PLAY_INTENT_URL;
+    btn.classList.remove('glow');
+    // Signed-in web users (shared omgithub sign-in hosts, not the app): straight to create, no sheet.
+    if (!inAiGameMakerApp() && commentsApi.canSignIn()) {
+      const ready = admin.meIfReady();
+      if (ready) { plusRoute(ready, btn); return; }
+      if (plusPending) return;
+      plusPending = true;
+      admin.fetchMeWithin(1000).then((m) => { plusPending = false; plusRoute(m, btn); });
       return;
     }
+    plusRoute(null, btn);
+    return;
+  });
+  btn.addEventListener('opus-plus-sheet', () => {
     btn.classList.remove('bounce');
     void btn.offsetWidth;
     btn.classList.add('bounce');
@@ -2996,9 +3013,9 @@ function buildCard(game, index) {
     <div class="rail" aria-label="Actions">
       <button type="button" class="rail-btn like ${liked ? 'liked' : ''}" aria-pressed="${liked ? 'true' : 'false'}" aria-label="${liked ? 'Unlike' : 'Like'}">
         <span class="rail-icon" aria-hidden="true">
-          <svg class="icon-thumb" viewBox="0 0 24 24" width="27" height="27">
-            <path class="heart-outline" d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3zm0 0 4-7.2c.3-.5.9-.8 1.5-.7 1.1.2 1.8 1.3 1.5 2.4L13.2 8.5H19a2 2 0 0 1 2 2.3l-1.3 8.5A2 2 0 0 1 17.7 21H7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-            <path class="heart-fill" d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3zm0 0 4-7.2c.3-.5.9-.8 1.5-.7 1.1.2 1.8 1.3 1.5 2.4L13.2 8.5H19a2 2 0 0 1 2 2.3l-1.3 8.5A2 2 0 0 1 17.7 21H7" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+          <svg class="icon-heart" viewBox="0 0 24 24" width="27" height="27">
+            <path class="heart-outline" d="M12 20.5s-7.5-4.6-9.3-9.2C1.4 7.9 3.6 4.5 7 4.5c2 0 3.4 1.1 5 3 1.6-1.9 3-3 5-3 3.4 0 5.6 3.4 4.3 6.8-1.8 4.6-9.3 9.2-9.3 9.2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            <path class="heart-fill" d="M12 20.5s-7.5-4.6-9.3-9.2C1.4 7.9 3.6 4.5 7 4.5c2 0 3.4 1.1 5 3 1.6-1.9 3-3 5-3 3.4 0 5.6 3.4 4.3 6.8-1.8 4.6-9.3 9.2-9.3 9.2z" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
           </svg>
         </span>
         ${likeCountHtml}
@@ -3814,6 +3831,38 @@ function wireSearch() {
   document.getElementById('searchClear')?.addEventListener('click', closeSearch);
 }
 
+const PROFILE_ORIGIN = 'https://omgithub.com/';
+/** Signed-in (omgithub sign-in hosts): GitHub avatar replaces the Liked toggle and opens a small menu. */
+async function wireAvatarMenu() {
+  if (!likedToggleEl || !commentsApi.canSignIn()) return;
+  const me = await admin.fetchMe();
+  if (!me.signedIn) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'avatar-wrap';
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'filter-btn avatar-btn'; b.id = 'avatarBtn';
+  b.setAttribute('aria-haspopup', 'menu'); b.setAttribute('aria-expanded', 'false');
+  b.setAttribute('aria-label', `Account menu${me.login ? ' for ' + me.login : ''}`); b.title = me.login || 'Account';
+  if (me.avatarUrl) { const img = document.createElement('img'); img.src = me.avatarUrl; img.alt = ''; img.referrerPolicy = 'no-referrer'; b.append(img); }
+  else b.textContent = (me.login || '?').slice(0, 1).toUpperCase();
+  const menu = document.createElement('div');
+  menu.className = 'avatar-menu'; menu.id = 'avatarMenu'; menu.setAttribute('role', 'menu'); menu.hidden = true;
+  const item = (label, href, cls) => { const a = document.createElement(href ? 'a' : 'button'); if (href) a.href = href; else a.type = 'button'; a.className = 'avatar-item ' + cls; a.setAttribute('role', 'menuitem'); a.textContent = label; menu.append(a); return a; };
+  item('My projects', PROFILE_ORIGIN + '#your-projects', 'my-projects');
+  if (me.login) item('Public profile', PROFILE_ORIGIN + encodeURIComponent(me.login), 'profile');
+  const likes = item('Likes', '', 'likes');
+  wrap.append(b, menu);
+  likedToggleEl.after(wrap);
+  likedToggleEl.hidden = true;
+  likedToggleEl.style.display = 'none';
+  const setOpen = (on) => { menu.hidden = !on; b.setAttribute('aria-expanded', on ? 'true' : 'false'); };
+  b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setOpen(menu.hidden); });
+  likes.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setOpen(false); applyLikedFilter(!activeLiked); });
+  menu.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('pointerdown', (e) => { if (!menu.hidden && !wrap.contains(e.target)) setOpen(false); }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) { setOpen(false); b.focus(); } });
+}
+
 function wireTagFilter() {
   syncTagUI();
   tagFilterEl?.addEventListener('click', () => applyTagFilter(''));
@@ -3922,6 +3971,7 @@ async function init() {
   wireSortToggle();
   wireMobileFilter();
   wireTagFilter();
+  wireAvatarMenu();
   wireSearch();
   // ?g= wins on every boot. With ?tag= we skip last-seen resume, but must
   // still land on the linked game (it used to fall to the tag's first card).
