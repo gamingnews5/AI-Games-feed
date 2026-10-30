@@ -39,15 +39,28 @@ export function fetchMe() {
   if (!mePromise) mePromise = (async () => {
     try {
       const r = await fetch(ME_URL, { credentials: 'include', cache: 'no-store', signal: timeoutSignal(FETCH_TIMEOUT_MS) });
-      if (!r.ok) return { signedIn: false, isAdmin: false };
+      if (!r.ok) return { signedIn: false, isAdmin: false, login: '', avatarUrl: '' };
       const data = await r.json();
       const u = data?.user;
-      return { signedIn: !!(u && u.id != null || u?.login) && data?.guest !== true && u?.guest !== true, isAdmin: u?.is_admin === true };
+      const signedIn = !!(u && u.id != null || u?.login) && data?.guest !== true && u?.guest !== true;
+      return { signedIn, isAdmin: u?.is_admin === true, login: signedIn && typeof u.login === 'string' ? u.login : '', avatarUrl: signedIn && typeof u.avatar_url === 'string' ? u.avatar_url : '' };
     } catch (_) {
-      return { signedIn: false, isAdmin: false };
+      return { signedIn: false, isAdmin: false, login: '', avatarUrl: '' };
     }
   })();
   return mePromise;
+}
+
+let meSettled = null;
+/** fetchMe() result if it already answered, else null (sync). */
+export function meIfReady() {
+  if (!mePromise) fetchMe();
+  if (!meSettled) mePromise.then((m) => { meSettled = m; });
+  return meSettled;
+}
+/** fetchMe(), but resolves null after ms if /api/me hasn't answered. */
+export function fetchMeWithin(ms) {
+  return Promise.race([fetchMe().then((m) => { meSettled = m; return m; }), new Promise((r) => setTimeout(() => r(null), ms))]);
 }
 
 /** true only for data.user?.is_admin === true; any failure → false. */
