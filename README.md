@@ -25,6 +25,9 @@ Phone-friendly **Top | New** toggle in the top bar:
 **Mobile** filter keeps games tagged for mobile/touch. Selection is stored in
 `localStorage` (`opus-feed-sort`, `opus-feed-mobile-only`).
 
+**Instant-play only** — the feed hides download-only games and games that require
+user-supplied ROM/game files. Direct `?g=` links still open hidden games.
+
 ## Audio
 
 Videos start muted on every page load (Instagram/TikTok-style). Unmuting lasts

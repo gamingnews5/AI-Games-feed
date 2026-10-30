@@ -70,7 +70,6 @@ const SINGLE_SLIDE_MS = 4000;
 const SLIDE_FADE_MS = 700;
 
 let allGames = [];
-let catalogCount = 0;
 let keyboardWired = false;
 let scrollHintWired = false;
 let hintHidden = false;
@@ -469,6 +468,12 @@ function seenTs(game) {
   );
 }
 
+/** Non-instant games: native download or user-supplied ROM/game files. */
+function isNonInstantGame(g) {
+  const tags = Array.isArray(g?.tags) ? g.tags : [];
+  return g?.browser_playable === false || g?.requires_own_files === true || tags.includes('rom');
+}
+
 /**
  * Sort games: fixed feedGroup() order, then within a group
  * Top: screenshot_score desc.
@@ -479,13 +484,14 @@ function seenTs(game) {
 /**
  * Fixed feed groups (Top/New only sort inside a group):
  * 1 browser games with a sourced clip, 2 self-recorded clips (tag rec),
- * 3 ROM / own-files / download games with a clip, 4 screenshot slideshows
+ * 3 ROM / own-files / download games with a clip (hidden; direct links only),
+ * 4 screenshot slideshows
  * (≥2 screenshots or tag screenshots), 5 single-image cards.
  */
 function feedGroup(g) {
   const tags = Array.isArray(g.tags) ? g.tags : [];
   if (g.video) {
-    if (g.requires_own_files === true || g.browser_playable === false || tags.includes('rom')) return 3;
+    if (isNonInstantGame(g)) return 3;
     return tags.includes('rec') ? 2 : 1;
   }
   const n = Array.isArray(g.slides) ? g.slides.length : 0;
@@ -647,9 +653,9 @@ function filterGames(games, mobileOnly) {
 }
 
 /** Sort by the current mode, then (when searching) exact matches before fuzzy ones. */
-/** Games anyone can see: admin-marked broken games are hidden for everyone (admins too). */
+/** Games anyone can see: broken and non-instant games are hidden from the feed. */
 function liveGames() {
-  return allGames.filter((g) => !g.broken);
+  return allGames.filter((g) => !g.broken && !isNonInstantGame(g));
 }
 
 function visibleGames(mode, mobileOnly) {
@@ -3651,9 +3657,8 @@ function syncLikeTotal() {
   if (!countEl) return;
   const live = liveGames();
   const videoCount = live.filter((g) => g.video).length;
-  const brokenN = allGames.length - live.length;
   const videoLabel = `${videoCount} ${videoCount === 1 ? 'video' : 'videos'}`;
-  countEl.textContent = `${Math.max(0, catalogCount - brokenN)} games`;
+  countEl.textContent = `${live.length} games`;
   countEl.title = videoLabel;
   countEl.dataset.tooltip = videoLabel;
 }
@@ -3951,8 +3956,6 @@ async function init() {
     }
   } catch (_) {}
 
-  catalogCount = catalogCountOf(data);
-
   allGames = playableGames(data);
   learnEngineLabels(allGames);
   // Admin overrides (rating/tags) from the device copy apply before the first render.
@@ -4001,11 +4004,6 @@ function playableGames(data) {
   );
 }
 
-function catalogCountOf(data) {
-  const n = Number(data.catalog_count ?? data.total_games ?? data.totals?.games);
-  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
-}
-
 /* Fresh catalog arrived after a cached boot: swap the data in place. The cards on
  * screen stay (no re-render, no scroll); the next sort/filter/search or the next
  * open uses the fresh list. */
@@ -4015,7 +4013,6 @@ function applyFreshCatalog(data) {
   learnEngineLabels(games);
   admin.applyOverrides(games);
   allGames = games;
-  catalogCount = catalogCountOf(data);
   syncLikeTotal();
   // Cards drawn from the device copy: refresh their Play target / iframe flag in place.
   for (const card of cards()) {
