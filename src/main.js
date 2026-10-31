@@ -2222,7 +2222,7 @@ function loadCreateFx() {
       sheet: createSheetEl,
       prompt: createPromptEl,
       send: createSendEl,
-      getTitle: () => allGames.find((g) => g.id === currentGameId())?.title || '',
+      getGame: () => allGames.find((g) => g.id === currentGameId()) || null,
       onFill: () => { syncCreateSend(); warmOmgithub(); },
     });
   }

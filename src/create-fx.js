@@ -71,8 +71,24 @@ const CHIP_COUNT = 4;
 const TYPE_COUNT = 6;
 const reduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
+/** Infer a clear dimension from the catalog title/description; omit it when uncertain. */
+export function gameDimension(game = {}) {
+  const text = `${game.title || ''} ${game.description || ''}`;
+  if (/\b3D\b|three\.?js|\bwebgl\b|\bwebgpu\b|first-person|third-person|voxel/i.test(text)) return '3D';
+  if (/\b2D\b|side-scroll|pixel-art|top-down|isometric/i.test(text)) return '2D';
+  return '';
+}
+
+/** A complete remix prompt for the current game, never a dangling prefix. */
+export function remixPrompt(game = {}) {
+  const title = String(game.title || '').trim();
+  if (!title) return '';
+  const dimension = gameDimension(game);
+  return `Create a ${dimension ? `${dimension} ` : ''}game inspired by ${title} with a new level, one new mechanic, and a fresh challenge.`;
+}
+
 /* ---------------- attach ---------------- */
-export function attachCreateFx({ sheet, prompt, send, getTitle, onFill }) {
+export function attachCreateFx({ sheet, prompt, send, getGame, onFill }) {
   const motion = !reduced();
   sheet.classList.add('fx');
   if (!motion) sheet.classList.add('fx-still');
@@ -124,9 +140,11 @@ export function attachCreateFx({ sheet, prompt, send, getTitle, onFill }) {
     return t;
   };
   const buildChips = () => {
-    const title = (getTitle() || '').trim();
+    const game = getGame() || {};
+    const title = String(game.title || '').trim();
     const list = [['🎲', 'Surprise me', 'random']];
-    if (title) list.push(['✨', `Like ${title} but…`, `Like ${title} but `]);
+    const remix = remixPrompt(game);
+    if (remix) list.push(['✨', `Remix ${title}`, remix]);
     const drawn = drawFresh(CHIP_COUNT + TYPE_COUNT);
     const chipIdeas = drawn.slice(0, CHIP_COUNT);
     twList = drawn.slice(CHIP_COUNT).map(([, t]) => t);
