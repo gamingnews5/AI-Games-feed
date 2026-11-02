@@ -3530,8 +3530,12 @@ function syncSortUI(mode) {
   });
 }
 
+const isMobileTag = () => String(activeTag || '').toLowerCase() === 'mobile';
+
 function syncMobileUI(on) {
   if (!mobileFilterEl) return;
+  // ?tag=mobile is shown on the plain Mobile chip itself (highlighted, no ✕).
+  on = on || isMobileTag();
   mobileFilterEl.classList.toggle('active', on);
   mobileFilterEl.setAttribute('aria-pressed', on ? 'true' : 'false');
 }
@@ -3644,10 +3648,10 @@ function wireSortToggle() {
 const tagFilterEl = document.getElementById('tagFilter');
 
 function syncTagUI() {
-  // The active-tag chip replaces a matching quick-filter chip (e.g. Mobile) so it never shows twice.
-  if (mobileFilterEl) mobileFilterEl.hidden = String(activeTag || '').toLowerCase() === 'mobile';
+  // Mobile tag: highlight the plain Mobile chip instead of a separate "Mobile ✕" pill.
+  syncMobileUI(readMobileOnly());
   if (!tagFilterEl) return;
-  tagFilterEl.hidden = !activeTag;
+  tagFilterEl.hidden = !activeTag || isMobileTag();
   tagFilterEl.textContent = activeTag ? `${tagLabel(activeTag)} ✕` : '';
   tagFilterEl.title = activeTag ? `Showing ${tagLabel(activeTag)} — tap to clear` : '';
   tagFilterEl.setAttribute('aria-label', activeTag ? `Clear tag filter ${activeTag}` : '');
@@ -3884,6 +3888,7 @@ function wireTagFilter() {
 function wireMobileFilter() {
   if (!mobileFilterEl) return;
   mobileFilterEl.addEventListener('click', () => {
+    if (isMobileTag()) { applyTagFilter(''); hideHint(); return; }
     const next = !readMobileOnly();
     writeMobileOnly(next);
     syncMobileUI(next);
