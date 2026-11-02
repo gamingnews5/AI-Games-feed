@@ -3644,6 +3644,8 @@ function wireSortToggle() {
 const tagFilterEl = document.getElementById('tagFilter');
 
 function syncTagUI() {
+  // The active-tag chip replaces a matching quick-filter chip (e.g. Mobile) so it never shows twice.
+  if (mobileFilterEl) mobileFilterEl.hidden = String(activeTag || '').toLowerCase() === 'mobile';
   if (!tagFilterEl) return;
   tagFilterEl.hidden = !activeTag;
   tagFilterEl.textContent = activeTag ? `${tagLabel(activeTag)} ✕` : '';
