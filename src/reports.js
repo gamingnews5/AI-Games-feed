@@ -1,6 +1,6 @@
 /* Broken-game reports.
- * POST   /api/feed/reports {game_id, text?, reason?, visitor?}  public, no credentials → 201/200 {ok, game_id, count}
- * GET    /api/feed/reports  admin (credentials) → { generated_at, reports: { id: { count, last_at, texts:[{text, reason, at}] } } }
+ * POST   /api/feed/reports {game_id, text?, reason?, visitor?}  public; cookies on omgithub hosts (reporter login for admins), none elsewhere → 201/200 {ok, game_id, count}
+ * GET    /api/feed/reports  admin (credentials) → { generated_at, reports: { id: { count, last_at, texts:[{text, reason, at, login, avatar_url}] } } }
  * DELETE /api/feed/reports/:game_id  admin → { ok, game_id } (server archives)
  */
 export const REPORTS_URL = 'https://omgithub.com/api/feed/reports';
@@ -41,8 +41,19 @@ export async function sendReport(gameId, { reason = null, text = '', visitor = '
   if (reason && REASON_LABEL[reason]) body.reason = reason;
   if (visitor && typeof visitor === 'string') body.visitor = visitor.slice(0, 64);
   let status = 0;
+  const post = (credentials) => fetch(REPORTS_URL, { method: 'POST', credentials, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: signal() });
   try {
-    const r = await fetch(REPORTS_URL, { method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: signal() });
+    // Signed-in omgithub hosts send cookies so admins see the reporter's login; lolgames.net stays anonymous.
+    const cred = CREDENTIALED_ORIGINS.has(location.origin);
+    let r;
+    try {
+      r = await post(cred ? 'include' : 'omit');
+    } catch (e) {
+      // Older app builds (≤2.0.11) rewrite CORS to '*', which fails credentialed fetches. Only a thrown
+      // network/CORS error retries (an HTTP response never does), so a report is never sent twice.
+      if (!cred) throw e;
+      r = await post('omit');
+    }
     status = r.status;
   } catch {}
   // Thanks either way: 429 / dedupe / offline must not invite re-sending.
@@ -58,7 +69,7 @@ function cleanReports(data) {
     const count = Number(r?.count);
     if (!id || !Number.isFinite(count) || count < 1) continue;
     const texts = Array.isArray(r.texts)
-      ? r.texts.filter((x) => x && typeof x === 'object').map((x) => ({ text: typeof x.text === 'string' ? x.text.slice(0, MAX_TEXT) : '', reason: REASON_LABEL[x.reason] ? x.reason : null, at: x.at || null }))
+      ? r.texts.filter((x) => x && typeof x === 'object').map((x) => ({ text: typeof x.text === 'string' ? x.text.slice(0, MAX_TEXT) : '', reason: REASON_LABEL[x.reason] ? x.reason : null, at: x.at || null, login: typeof x.login === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(x.login) ? x.login : null, avatar_url: typeof x.avatar_url === 'string' && /^https:\/\//.test(x.avatar_url) ? x.avatar_url : null }))
       : [];
     out[id] = { count: Math.floor(count), last_at: r.last_at || texts[0]?.at || null, texts };
   }
@@ -100,13 +111,16 @@ export function ago(iso, now = Date.now()) {
 }
 
 /** Card description lines for the Reports view: header + deduped texts, latest first (≤5, +N more). */
+const CREDENTIALED_ORIGINS = new Set(['https://games.omgithub.com', 'https://android.omgithub.com']);
+
 export function reportLines(r, { max = 5, now } = {}) {
-  if (!r) return { head: 'No reports', lines: [], more: 0 };
+  if (!r) return { head: 'No reports', lines: [], items: [], more: 0 };
   const n = r.count;
   const when = ago(r.last_at, now);
   const head = `${n} ${n === 1 ? 'report' : 'reports'}${when ? ` · last ${when}` : ''}`;
   const seen = new Set();
   const all = [];
+  const items = [];
   const sorted = r.texts.slice().sort((a, b) => (Date.parse(b.at || '') || 0) - (Date.parse(a.at || '') || 0));
   for (const x of sorted) {
     const label = x.reason ? REASON_LABEL[x.reason] : '';
@@ -115,8 +129,9 @@ export function reportLines(r, { max = 5, now } = {}) {
     if (!key || seen.has(key)) continue;
     seen.add(key);
     all.push(line);
+    items.push({ line, login: x.login || null, avatar_url: x.avatar_url || null });
   }
-  return { head, lines: all.slice(0, max), more: Math.max(0, all.length - max) };
+  return { head, lines: all.slice(0, max), items: items.slice(0, max), more: Math.max(0, all.length - max) };
 }
 
 /* ---- Report sheet (reuses the comments-sheet look) ---- */
