@@ -1762,3 +1762,8 @@ html.app-kb .comments-write-sheet .comments-panel { translate: 0 calc(-1 * var(-
 .avatar-menu[hidden] { display: none; }
 .avatar-item { display: block; text-align: left; padding: 10px 12px; border-radius: 8px; color: #fff; text-decoration: none; font: inherit; font-size: 14px; background: none; border: 0; cursor: pointer; }
 .avatar-item:hover, .avatar-item:focus-visible { background: rgba(255, 255, 255, 0.1); }
+
+/* Admin reports feed: reporter avatar + @login (or 'guest'). */
+.report-who { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; font-size: 12px; font-weight: 600; color: #9ecbff; text-decoration: none; vertical-align: middle; }
+.report-who img { width: 16px; height: 16px; border-radius: 50%; display: block; }
+.report-who.guest { color: rgba(255, 255, 255, 0.55); font-weight: 500; }

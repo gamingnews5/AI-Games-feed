@@ -4157,9 +4157,12 @@ function dismissReport() {
 
 function reportDescHtml(game) {
   const r = reportsMap?.[game.id];
-  const { head, lines, more } = reports.reportLines(r);
-  return `<div class="desc report-desc"><p class="report-head">${escapeHtml(head)}</p>${lines
-    .map((l) => `<p class="report-line">“${escapeHtml(l)}”</p>`)
+  const { head, items, more } = reports.reportLines(r);
+  const who = (x) => x.login
+    ? `<a class="report-who" href="https://omgithub.com/${encodeURIComponent(x.login)}" target="_blank" rel="noopener">${x.avatar_url ? `<img src="${escapeHtml(x.avatar_url)}" alt="" width="16" height="16" referrerpolicy="no-referrer">` : ''}@${escapeHtml(x.login)}</a>`
+    : '<span class="report-who guest">guest</span>';
+  return `<div class="desc report-desc"><p class="report-head">${escapeHtml(head)}</p>${items
+    .map((x) => `<p class="report-line">${who(x)} “${escapeHtml(x.line)}”</p>`)
     .join('')}${more ? `<p class="report-more">+${more} more</p>` : ''}</div>`;
 }
 
