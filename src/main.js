@@ -1739,6 +1739,7 @@ function setActiveIndex(next) {
   }
   if (id) {
     markSeen(id);
+    sessionShown.add(id);
     analytics.cardEnter(id);
   }
   const warmEnd = Math.min(activeIndex + PLAY_NAV_PRELOAD_WINDOW - 1, list.length - 1);
@@ -1753,6 +1754,7 @@ function setActiveIndex(next) {
   syncLoadSlides();
   maybeAdvancePipeline();
   if (changed) rememberActiveGame();
+  maybeAppendEndless();
 }
 
 function currentIndexFromScroll() {
@@ -2961,11 +2963,14 @@ function wireTagChips(card, game) {
   });
 }
 
-function buildCard(game, index) {
+function buildCard(game, index, { key = '', badge = '', note = false } = {}) {
   const card = document.createElement('article');
   card.className = 'card';
   card.dataset.index = String(index);
   card.dataset.id = game.id;
+  // Repeat cards (mixed tail / endless rounds) share the game id but get a unique DOM key.
+  card.dataset.key = key || game.id;
+  if (badge) card.dataset.tail = badge;
   card.dataset.url = game.play_url;
   if (typeof game.iframe === 'boolean') card.dataset.iframe = String(game.iframe);
 
@@ -3009,7 +3014,9 @@ function buildCard(game, index) {
         <path d="M17 8.5a5 5 0 0 1 0 7M19.5 6a8.5 8.5 0 0 1 0 12"/>
       </svg>
     </button>`}
+    ${note ? `<div class="round-note" role="note"><strong>You’re up to date</strong><span>Here’s another round</span></div>` : ''}
     <div class="card-body">
+      ${badge ? `<span class="tail-badge">${escapeHtml(badge)}</span>` : ''}
       <div class="badges">${badgesHtml(game)}</div>
       ${authorRowHtml(game)}
       <h2 class="title">${escapeHtml(game.title)}</h2>
@@ -3073,16 +3080,19 @@ function buildCard(game, index) {
     // it drops out the next time the filter is entered.
     const on = toggleLike(game.id);
     if (on) analytics.track('like', { game_id: game.id });
-    likeBtn.classList.toggle('liked', on);
-    likeBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    likeBtn.setAttribute('aria-label', on ? 'Unlike' : 'Like');
     syncLikeTotal();
-    const countSpan = likeBtn.querySelector('.like-count');
-    if (countSpan) {
-      const n = remoteLikesOf(game) + (on ? 1 : 0);
-      countSpan.textContent = formatCompact(n);
-      countSpan.hidden = false;
-    }
+    // Same game may appear more than once (mixed tail / endless): keep every copy in sync.
+    const btns = feedEl.querySelectorAll(`.card[data-id="${CSS.escape(String(game.id))}"] .rail-btn.like`);
+    (btns.length ? btns : [likeBtn]).forEach((b) => {
+      b.classList.toggle('liked', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.setAttribute('aria-label', on ? 'Unlike' : 'Like');
+      const countSpan = b.querySelector('.like-count');
+      if (countSpan) {
+        countSpan.textContent = formatCompact(remoteLikesOf(game) + (on ? 1 : 0));
+        countSpan.hidden = false;
+      }
+    });
   });
 
   card.querySelector('.comments').addEventListener('click', (e) => {
@@ -3540,6 +3550,158 @@ function syncMobileUI(on) {
   mobileFilterEl.setAttribute('aria-pressed', on ? 'true' : 'false');
 }
 
+
+/* ---------- Mixed tail + endless rounds ---------- */
+
+/** Ids that became the active card this session (pool (a) skips them). */
+const sessionShown = new Set();
+/** Endless state for the current render; null in Liked / Reports / search views. */
+let tail = null;
+const ENDLESS_BATCH = 20;
+const ENDLESS_NO_REPEAT = 20;
+const ENDLESS_AHEAD = 8;
+const ENDLESS_MAX_EXTRA = 240;
+const ENDLESS_TRIM_KEEP_ABOVE = 40;
+
+const isClipGame = (g) => { const f = feedGroup(g); return f === 1 || f === 2; };
+
+/** Label for clips from outside the active filter. */
+function outsideFilterBadge(mobileOnly) {
+  if (activeTag) return isMobileTag() ? 'Not mobile' : `Not ${tagLabel(activeTag)}`;
+  return mobileOnly ? 'Not mobile' : 'Other games';
+}
+
+function filterActive(mobileOnly) {
+  return Boolean(activeTag) || Boolean(mobileOnly);
+}
+
+/** Live clips outside the current filter (empty when no filter). */
+function outsideFilterClips(mode, mobileOnly, viewIds) {
+  if (!filterActive(mobileOnly)) return [];
+  return sortGames(liveGames().filter((g) => isClipGame(g) && !viewIds.has(g.id)), mode);
+}
+
+/**
+ * First pass: once the view's clips are used up and screenshot cards start,
+ * alternate clip / screenshot. Clips come from (a) unwatched clips outside
+ * the filter, then (b) watched clips (liked first, then score), once each.
+ * Returns [{ game, badge }].
+ */
+function mixTail(games, anchorId, mode, mobileOnly) {
+  const items = games.map((game) => ({ game, badge: '' }));
+  const seen = readSeen();
+  const anchorIdx = anchorId ? games.findIndex((g) => g.id === anchorId) : -1;
+  let upcoming = anchorIdx >= 0 ? anchorIdx + 1 : games.findIndex((g) => !seen[g.id]);
+  if (upcoming < 0) upcoming = games.length;
+  let tailStart = -1;
+  for (let i = upcoming; i < games.length; i++) {
+    if (feedGroup(games[i]) >= 4) { tailStart = i; break; }
+  }
+  if (tailStart < 0) return items;
+  const inList = new Set(games.map((g) => g.id));
+  const badgeA = outsideFilterBadge(mobileOnly);
+  const poolA = outsideFilterClips(mode, mobileOnly, inList)
+    .filter((g) => !seen[g.id] && !sessionShown.has(g.id))
+    .map((game) => ({ game, badge: badgeA }));
+  const usedA = new Set(poolA.map((x) => x.game.id));
+  const poolB = liveGames()
+    .filter((g) => isClipGame(g) && seen[g.id] && g.id !== anchorId && !usedA.has(g.id))
+    .sort((a, b) => (isLiked(b.id) - isLiked(a.id)) || effectiveScore(b) - effectiveScore(a))
+    .map((game) => ({ game, badge: 'Watched' }));
+  const pool = [...poolA, ...poolB];
+  const out = items.slice(0, tailStart);
+  for (const shot of items.slice(tailStart)) {
+    if (pool.length) out.push(pool.shift());
+    out.push(shot);
+  }
+  return out;
+}
+
+/** Weighted shuffle (Efraimidis–Spirakis): liked and high-score games come up more often. */
+function weightedShuffle(list) {
+  const likes = readLikes();
+  return list
+    .map((g) => {
+      const score = Math.max(0, Number(effectiveScore(g)) || 0);
+      const w = (likes[g.id] ? 3 : 1) * Math.pow(1 + score, 1.5);
+      return { g, k: Math.pow(Math.random(), 1 / w) };
+    })
+    .sort((a, b) => b.k - a.k)
+    .map((x) => x.g);
+}
+
+/** Next endless card: from the shuffled queue, skipping anything in the recent window. */
+function nextEndlessGame() {
+  const t = tail;
+  const win = Math.min(ENDLESS_NO_REPEAT, Math.max(0, t.pool.length - 1));
+  const recent = new Set(t.recent.slice(-win));
+  for (let tries = 0; tries < 2; tries++) {
+    const i = t.queue.findIndex((g) => !recent.has(g.id));
+    if (i >= 0) return t.queue.splice(i, 1)[0];
+    // Queue empty or all left are too recent: start a new round (leftovers first).
+    t.queue = [...t.queue, ...weightedShuffle(t.pool)];
+    t.round++;
+  }
+  return null;
+}
+
+function nextCardKey(id) {
+  const n = (tail.keyCount.get(id) || 0) + 1;
+  tail.keyCount.set(id, n);
+  return n === 1 ? id : `${id}~${n}`;
+}
+
+function endlessBadge(game) {
+  if (tail.outside.has(game.id)) return tail.badgeA;
+  return isClipGame(game) && readSeen()[game.id] ? 'Watched' : '';
+}
+
+/** Lazily append the next batch once the active card is near the bottom. */
+function maybeAppendEndless() {
+  if (!tail || !tail.pool.length) return;
+  const list = cards();
+  if (activeIndex < list.length - ENDLESS_AHEAD) return;
+  const frag = document.createDocumentFragment();
+  let idx = list.length;
+  for (let n = 0; n < ENDLESS_BATCH; n++) {
+    const game = nextEndlessGame();
+    if (!game) break;
+    const note = !tail.noted;
+    tail.noted = true;
+    const card = buildCard(game, idx++, { key: nextCardKey(game.id), badge: endlessBadge(game), note });
+    card.dataset.round = String(Math.max(2, tail.round + 1));
+    frag.appendChild(card);
+    tail.recent.push(game.id);
+    if (tail.recent.length > ENDLESS_NO_REPEAT * 3) tail.recent.splice(0, tail.recent.length - ENDLESS_NO_REPEAT);
+  }
+  feedEl.appendChild(frag);
+  trimEndless();
+}
+
+/** Keep the DOM bounded: drop endless cards far above the active one. */
+function trimEndless() {
+  const list = cards();
+  const excess = list.length - (tail.firstLen + ENDLESS_MAX_EXTRA);
+  if (excess < ENDLESS_BATCH) return;
+  const n = Math.min(excess, activeIndex - ENDLESS_TRIM_KEEP_ABOVE - tail.firstLen);
+  if (n <= 0) return;
+  const first = list[tail.firstLen];
+  const h = list[tail.firstLen + n].offsetTop - first.offsetTop;
+  for (let i = tail.firstLen; i < tail.firstLen + n; i++) {
+    const v = videoOf(list[i]);
+    if (v) { v.pause(); detachSrc(v); }
+    teardownClipBg(list[i]);
+    list[i].remove();
+  }
+  cards().forEach((c, i) => { c.dataset.index = String(i); });
+  activeIndex -= n;
+  pipelineTip = Math.max(-1, pipelineTip - n);
+  const prev = feedEl.style.scrollBehavior;
+  feedEl.style.scrollBehavior = 'auto';
+  feedEl.scrollTop -= h;
+  feedEl.style.scrollBehavior = prev;
+}
+
 function renderFeed(mode, mobileOnly, { restore = true, landId = '', ensureId = '' } = {}) {
   let sorted = visibleGames(mode, mobileOnly);
   // A shared ?g= link must open that game even when the tag / search / mobile
@@ -3565,6 +3727,7 @@ function renderFeed(mode, mobileOnly, { restore = true, landId = '', ensureId = 
   tearDownVideos();
   feedEl.innerHTML = '';
   resetWatchAccum(null);
+  tail = null;
 
   if (!games.length) {
     if (mode === SORT_NEW && sorted.length) {
@@ -3593,10 +3756,33 @@ function renderFeed(mode, mobileOnly, { restore = true, landId = '', ensureId = 
     return;
   }
 
+  // Mixed tail + endless rounds: every view except Liked, Reports and search results.
+  const endless = !listView && !searchWords(activeSearch).length;
+  const items = endless ? mixTail(games, anchorId, mode, mobileOnly) : games.map((game) => ({ game, badge: '' }));
+  const keyCount = new Map();
   const frag = document.createDocumentFragment();
-  games.forEach((g, i) => frag.appendChild(buildCard(g, i)));
-  frag.appendChild(buildEndCard());
+  items.forEach(({ game, badge }, i) => {
+    const n = (keyCount.get(game.id) || 0) + 1;
+    keyCount.set(game.id, n);
+    frag.appendChild(buildCard(game, i, { key: n === 1 ? game.id : `${game.id}~${n}`, badge }));
+  });
+  if (!endless) frag.appendChild(buildEndCard());
   feedEl.appendChild(frag);
+  if (endless) {
+    const viewIds = new Set(sorted.map((g) => g.id));
+    const outside = outsideFilterClips(mode, mobileOnly, viewIds);
+    tail = {
+      pool: [...sorted, ...outside],
+      outside: new Set(outside.map((g) => g.id)),
+      badgeA: outsideFilterBadge(mobileOnly),
+      queue: [],
+      round: 1,
+      noted: false,
+      recent: items.slice(-ENDLESS_NO_REPEAT).map((x) => x.game.id),
+      keyCount,
+      firstLen: items.length,
+    };
+  }
 
   restoring = true;
   // Force instant land: assignment to scrollTop also honors CSS scroll-behavior.
