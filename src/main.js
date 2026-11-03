@@ -3583,9 +3583,11 @@ function outsideFilterClips(mode, mobileOnly, viewIds) {
 
 /**
  * First pass: once the view's clips are used up and screenshot cards start,
- * alternate clip / screenshot. Clips come from (a) unwatched clips outside
- * the filter, then (b) watched clips (liked first, then score), once each.
- * Returns [{ game, badge }].
+ * put one clip before each screenshot. In a filtered view the clip slots
+ * alternate (a) unwatched clips outside the filter (Top/New order) and
+ * (b) watched clips inside the filter (liked first, then score), once each;
+ * when one pool runs dry the other continues alone. Without a filter only
+ * (b) applies (every watched clip). Returns [{ game, badge }].
  */
 function mixTail(games, anchorId, mode, mobileOnly) {
   const items = games.map((game) => ({ game, badge: '' }));
@@ -3599,31 +3601,39 @@ function mixTail(games, anchorId, mode, mobileOnly) {
   }
   if (tailStart < 0) return items;
   const inList = new Set(games.map((g) => g.id));
+  const filtered = filterActive(mobileOnly);
   const badgeA = outsideFilterBadge(mobileOnly);
   const poolA = outsideFilterClips(mode, mobileOnly, inList)
     .filter((g) => !seen[g.id] && !sessionShown.has(g.id))
     .map((game) => ({ game, badge: badgeA }));
-  const usedA = new Set(poolA.map((x) => x.game.id));
   const poolB = liveGames()
-    .filter((g) => isClipGame(g) && seen[g.id] && g.id !== anchorId && !usedA.has(g.id))
+    .filter((g) => isClipGame(g) && seen[g.id] && g.id !== anchorId && (!filtered || inList.has(g.id)))
     .sort((a, b) => (isLiked(b.id) - isLiked(a.id)) || effectiveScore(b) - effectiveScore(a))
     .map((game) => ({ game, badge: 'Watched' }));
-  const pool = [...poolA, ...poolB];
   const out = items.slice(0, tailStart);
+  let turnA = true;
   for (const shot of items.slice(tailStart)) {
-    if (pool.length) out.push(pool.shift());
+    const first = turnA ? poolA : poolB;
+    const pick = first.length ? first.shift() : (turnA ? poolB : poolA).shift();
+    if (pick) { out.push(pick); turnA = !turnA; }
     out.push(shot);
   }
   return out;
 }
 
-/** Weighted shuffle (Efraimidis–Spirakis): liked and high-score games come up more often. */
+/**
+ * Weighted shuffle (Efraimidis–Spirakis): liked (3×) and high-score games come
+ * up more often; in filtered views watched in-filter clips get 2× over
+ * watched outside-filter clips.
+ */
 function weightedShuffle(list) {
   const likes = readLikes();
+  const seen = readSeen();
   return list
     .map((g) => {
       const score = Math.max(0, Number(effectiveScore(g)) || 0);
-      const w = (likes[g.id] ? 3 : 1) * Math.pow(1 + score, 1.5);
+      let w = (likes[g.id] ? 3 : 1) * Math.pow(1 + score, 1.5);
+      if (tail?.filtered && seen[g.id] && isClipGame(g) && !tail.outside.has(g.id)) w *= 2;
       return { g, k: Math.pow(Math.random(), 1 / w) };
     })
     .sort((a, b) => b.k - a.k)
@@ -3775,6 +3785,7 @@ function renderFeed(mode, mobileOnly, { restore = true, landId = '', ensureId = 
       pool: [...sorted, ...outside],
       outside: new Set(outside.map((g) => g.id)),
       badgeA: outsideFilterBadge(mobileOnly),
+      filtered: filterActive(mobileOnly),
       queue: [],
       round: 1,
       noted: false,
