@@ -594,7 +594,7 @@ function searchFields(g) {
 /** Tags a card can be filtered by: catalog tags plus the engine name. */
 function gameTags(g) {
   // Admin chip override: the card's chips are exactly the list, and so is the filter.
-  if (Array.isArray(g.admin_tags)) return g.admin_tags.slice();
+  if (Array.isArray(g.admin_tags)) return overrideTags(g);
   const out = Array.isArray(g.tags) ? g.tags.slice() : [];
   const eng = normalizeTag(String(g.engine || '').replace(/[\s.]+/g, '-'));
   if (eng && !out.includes(eng)) out.push(eng);
@@ -612,7 +612,8 @@ function platformTags(platforms) {
   const set = new Set(platforms.map((x) => String(x).toLowerCase()));
   const out = [];
   if (set.has('mobile') || set.has('touch') || set.has('phone')) out.push('mobile');
-  if (set.has('pc') || set.has('desktop')) out.push('pc');
+  // No PC chip: almost every game is desktop-playable, so it says nothing (Igor, 2026-11-04).
+  // Overrides that still hold 'pc' are filtered too (OVERRIDE_STRIP).
   return out;
 }
 
@@ -2890,9 +2891,14 @@ function canonChipTag(raw) {
   return v;
 }
 admin.setTagCanon(canonChipTag);
+/** Igor's overrides may hold pc / model chips the editor auto-saved; drop them (Igor, 2026-11-04). */
+const OVERRIDE_STRIP = new Set(['pc', 'opus-5.5', 'astra', 'sonnet-5.5', 'gemini-4-argon']);
+function overrideTags(game) {
+  return game.admin_tags.filter((t) => !OVERRIDE_STRIP.has(String(t).toLowerCase()));
+}
 /** Slugs of the chips the card shows (rating excluded), in card order. */
 function chipTags(game) {
-  if (Array.isArray(game.admin_tags)) return game.admin_tags.slice();
+  if (Array.isArray(game.admin_tags)) return overrideTags(game);
   const out = [];
   const add = (t) => t && !out.includes(t) && out.push(t);
   platformTags(game.platforms).forEach(add);
@@ -2902,7 +2908,7 @@ function chipTags(game) {
   return out;
 }
 function overrideChipsHtml(game) {
-  return game.admin_tags
+  return overrideTags(game)
     .map((t) => {
       const cls = t === 'mobile' || t === 'pc' ? 'platform' : MADE_LABELS[t] ? 'made-with' : engineLabels.has(t) ? 'engine' : '';
       return chipHtml(t, chipLabel(t), cls);
