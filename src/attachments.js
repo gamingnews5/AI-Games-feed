@@ -24,7 +24,6 @@ export const MAX_VIDEO_SEC = 30;
 export const IMG_MAX_SIDE = 1600;
 export const IMG_TARGET_BYTES = 300 * 1024;
 export const IMG_MAX_BYTES = 1024 * 1024;
-const VIDEO_TYPES = /^video\/(mp4|webm|quicktime)$/;
 const UPLOAD_TIMEOUT_MS = 60000;
 const FF_KEY = 'opus-feed-ff';
 
@@ -150,14 +149,32 @@ export function videoDuration(file, timeoutMs = 6000) {
   });
 }
 
+/** Real video container from the first bytes (omgithub 415s when the declared mime doesn't match). */
+export async function sniffVideoType(file) {
+  try {
+    const b = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+    if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return 'video/webm';
+    if (String.fromCharCode(b[4], b[5], b[6], b[7]) === 'ftyp') {
+      return String.fromCharCode(b[8], b[9], b[10], b[11]) === 'qt  ' ? 'video/quicktime' : 'video/mp4';
+    }
+  } catch (_) {}
+  return '';
+}
+const VIDEO_EXT = { 'video/webm': 'webm', 'video/mp4': 'mp4', 'video/quicktime': 'mov' };
+
 /** → { blob, kind, name, preview } or { error } (friendly text). */
 export async function prepareFile(file) {
   if (isVideo(file)) {
-    if (!VIDEO_TYPES.test(file.type)) return { error: 'Use an mp4, webm or mov video' };
     if (file.size > MAX_VIDEO_BYTES) return { error: `Video is too big (max ${MAX_VIDEO_BYTES / 1048576} MB)` };
+    const type = await sniffVideoType(file);
+    if (!type) return { error: 'Use an mp4, webm or mov video' };
     const d = await videoDuration(file);
-    if (Number.isFinite(d) && d > MAX_VIDEO_SEC + 0.5) return { error: `Video is too long (max ${MAX_VIDEO_SEC} seconds)` };
-    return { blob: file, kind: 'video', name: file.name || 'video.mp4', duration: Number.isFinite(d) ? Math.round(d * 100) / 100 : null, preview: URL.createObjectURL(file) };
+    if (!Number.isFinite(d) || d <= 0) return { error: "Couldn't read that video — try an mp4" };
+    if (d > MAX_VIDEO_SEC + 0.5) return { error: `Video is too long (max ${MAX_VIDEO_SEC} seconds)` };
+    // Declare the sniffed type (and a matching extension) whatever the browser guessed from the name.
+    const blob = file.type === type ? file : new Blob([file], { type });
+    const base = String(file.name || 'video').replace(/\.[^.]+$/, '') || 'video';
+    return { blob, kind: 'video', name: `${base}.${VIDEO_EXT[type]}`, duration: Math.round(d * 100) / 100, preview: URL.createObjectURL(file) };
   }
   if (isImage(file)) {
     try {
@@ -177,7 +194,7 @@ export async function prepareFile(file) {
 export async function uploadAttachment(item) {
   const fd = new FormData();
   fd.append('file', item.blob, item.name);
-  if (item.kind === 'video' && item.duration != null) fd.append('duration', String(item.duration));
+  if (item.kind === 'video') fd.append('duration', String(item.duration));
   let r;
   try {
     r = await apiFetch(ATTACHMENTS_URL, { method: 'POST', body: fd }, UPLOAD_TIMEOUT_MS);
