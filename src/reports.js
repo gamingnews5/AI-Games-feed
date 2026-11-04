@@ -1,9 +1,12 @@
 /* Broken-game reports.
- * POST   /api/feed/reports {game_id, text?, reason?, visitor?}  public; cookies on omgithub hosts (reporter login for admins), none elsewhere → 201/200 {ok, game_id, count}
- * GET    /api/feed/reports  admin (credentials) → { generated_at, reports: { id: { count, last_at, texts:[{text, reason, at, login, avatar_url}] } } }
+ * POST   /api/feed/reports {game_id, text?, reason?, visitor?, attachments?:[id]}  public; cookies on omgithub hosts (reporter login for admins), none elsewhere → 201/200 {ok, game_id, count}
+ *        attachments = ids from POST /api/attachments (attachments.js), only sent when attachEnabled()
+ * GET    /api/feed/reports  admin (credentials) → { generated_at, reports: { id: { count, last_at, texts:[{text, reason, at, login, avatar_url, attachments?:[{url,kind}]}] } } }
  * DELETE /api/feed/reports/:game_id  admin → { ok, game_id } (server archives)
  */
-export const REPORTS_URL = 'https://omgithub.com/api/feed/reports';
+import { API_ORIGIN, CREDENTIALED_ORIGINS, attachEnabled, createAttachPicker, cleanAttachments, MAX_FILES } from './attachments.js';
+
+export const REPORTS_URL = `${API_ORIGIN}/api/feed/reports`;
 export const REPORTED_KEY = 'opus-feed-reported';
 export const MAX_TEXT = 500;
 export const REASONS = [
@@ -34,8 +37,9 @@ function markReported(id) {
 }
 
 /** Send one report. Any answer (incl. 429 / network error) counts as done for this device. */
-export async function sendReport(gameId, { reason = null, text = '', visitor = '' } = {}) {
+export async function sendReport(gameId, { reason = null, text = '', visitor = '', attachments = [] } = {}) {
   const body = { game_id: gameId };
+  if (Array.isArray(attachments) && attachments.length) body.attachments = attachments.slice(0, MAX_FILES).map(String);
   const t = String(text || '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ' ').trim().slice(0, MAX_TEXT);
   if (t) body.text = t;
   if (reason && REASON_LABEL[reason]) body.reason = reason;
@@ -69,7 +73,7 @@ function cleanReports(data) {
     const count = Number(r?.count);
     if (!id || !Number.isFinite(count) || count < 1) continue;
     const texts = Array.isArray(r.texts)
-      ? r.texts.filter((x) => x && typeof x === 'object').map((x) => ({ text: typeof x.text === 'string' ? x.text.slice(0, MAX_TEXT) : '', reason: REASON_LABEL[x.reason] ? x.reason : null, at: x.at || null, login: typeof x.login === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(x.login) ? x.login : null, avatar_url: typeof x.avatar_url === 'string' && /^https:\/\//.test(x.avatar_url) ? x.avatar_url : null }))
+      ? r.texts.filter((x) => x && typeof x === 'object').map((x) => ({ text: typeof x.text === 'string' ? x.text.slice(0, MAX_TEXT) : '', reason: REASON_LABEL[x.reason] ? x.reason : null, at: x.at || null, login: typeof x.login === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(x.login) ? x.login : null, avatar_url: typeof x.avatar_url === 'string' && /^https:\/\//.test(x.avatar_url) ? x.avatar_url : null, attachments: cleanAttachments(x.attachments) }))
       : [];
     out[id] = { count: Math.floor(count), last_at: r.last_at || texts[0]?.at || null, texts };
   }
@@ -111,8 +115,6 @@ export function ago(iso, now = Date.now()) {
 }
 
 /** Card description lines for the Reports view: header + deduped texts, latest first (≤5, +N more). */
-const CREDENTIALED_ORIGINS = new Set(['https://games.omgithub.com', 'https://android.omgithub.com']);
-
 export function reportLines(r, { max = 5, now } = {}) {
   if (!r) return { head: 'No reports', lines: [], items: [], more: 0 };
   const n = r.count;
@@ -125,11 +127,13 @@ export function reportLines(r, { max = 5, now } = {}) {
   for (const x of sorted) {
     const label = x.reason ? REASON_LABEL[x.reason] : '';
     const line = x.text && label ? `${label}: ${x.text}` : x.text || label;
+    const atts = x.attachments || [];
     const key = line.toLowerCase().replace(/\s+/g, ' ').trim();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
+    // Attachments keep a report visible even when its text repeats (or is empty).
+    if (!atts.length && (!key || seen.has(key))) continue;
+    if (key) seen.add(key);
     all.push(line);
-    items.push({ line, login: x.login || null, avatar_url: x.avatar_url || null });
+    items.push({ line, login: x.login || null, avatar_url: x.avatar_url || null, attachments: atts });
   }
   return { head, lines: all.slice(0, max), items: items.slice(0, max), more: Math.max(0, all.length - max) };
 }
@@ -137,6 +141,7 @@ export function reportLines(r, { max = 5, now } = {}) {
 /* ---- Report sheet (reuses the comments-sheet look) ---- */
 let sheetEl = null;
 let sheetState = null; // { game, onSent, onDismiss }
+let picker = null; // attachments (behind attachEnabled())
 function ensureSheet() {
   if (sheetEl) return sheetEl;
   sheetEl = document.createElement('div');
@@ -159,6 +164,10 @@ function ensureSheet() {
       </form>
     </div>`;
   document.body.appendChild(sheetEl);
+  if (attachEnabled()) {
+    picker = createAttachPicker();
+    sheetEl.querySelector('.report-send').before(picker.el);
+  }
   sheetEl.querySelectorAll('[data-close-report]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); sheetState?.onDismiss?.(); }));
   sheetEl.querySelector('.report-reasons').addEventListener('click', (e) => {
     const b = e.target.closest('[data-reason]');
@@ -169,11 +178,24 @@ function ensureSheet() {
   sheetEl.querySelector('.report-body').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!sheetState || sheetState.sending) return;
+    if (picker?.busy()) { picker.say('Still preparing the files…'); return; }
     const st = sheetState;
     st.sending = true;
     const btn = sheetEl.querySelector('.report-send');
     btn.disabled = true;
-    const res = await sendReport(st.game.id, { reason: st.reason, text: sheetEl.querySelector('.report-text').value, visitor: st.visitor || '' });
+    let attachments = [];
+    if (picker?.count()) {
+      try {
+        attachments = await picker.uploadAll((i, n) => { btn.textContent = `Uploading ${i}/${n}…`; });
+      } catch (e) {
+        btn.textContent = 'Send'; btn.disabled = false; st.sending = false;
+        picker.say(e?.message || "Couldn't upload — try again or remove the file");
+        return;
+      }
+      btn.textContent = 'Send';
+    }
+    if (sheetState !== st) { btn.disabled = false; return; }
+    const res = await sendReport(st.game.id, { reason: st.reason, text: sheetEl.querySelector('.report-text').value, visitor: st.visitor || '', attachments });
     btn.disabled = false;
     st.sending = false;
     st.onSent?.(res);
@@ -187,6 +209,7 @@ export function openReportSheet(opts) {
   sheetState = { ...opts, reason: null };
   el.querySelector('.comments-title').textContent = `Report · ${opts.game.title || opts.game.id}`;
   el.querySelector('.report-text').value = '';
+  picker?.reset();
   el.querySelectorAll('[data-reason]').forEach((x) => { x.classList.remove('on'); x.setAttribute('aria-pressed', 'false'); });
   el.hidden = false;
   el.setAttribute('aria-hidden', 'false');

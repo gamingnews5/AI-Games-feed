@@ -8,6 +8,8 @@ import {
 import * as analytics from './analytics.js';
 import * as admin from './admin.js';
 import * as reports from './reports.js';
+import * as feedback from './feedback.js';
+import { attachEnabled, attachmentsHtml } from './attachments.js';
 import * as commentsApi from './comments.js';
 import { MEDIA_BASE } from './catalog-config.js';
 import { searchGames, queryWords } from './search.js';
@@ -763,6 +765,9 @@ function onHistoryPop() {
   }
   if (reportSheetOpen && state.opus !== 'report') {
     closeReportSheet();
+  }
+  if (feedbackOpen && state.opus !== 'feedback') {
+    closeFeedback();
   }
   if (state.opus) return;
   const urlReports = reportsViewFromUrl() && isAdmin;
@@ -2148,7 +2153,7 @@ function wireAppKeyboard() {
   const syncAppH = () => {
     const px = window.innerHeight;
     const kbBusy = kbPx() > 0 || root.classList.contains('kb-anim');
-    if (px < lastPx && (createOpen || reportSheetOpen || commentsOpen) && kbBusy) return;
+    if (px < lastPx && (createOpen || reportSheetOpen || feedbackOpen || commentsOpen) && kbBusy) return;
     const h = `${px}px`;
     lastPx = px;
     if (h !== lastH) { lastH = h; root.style.setProperty('--app-h', h); }
@@ -3479,7 +3484,7 @@ function wireKeyboard() {
   if (keyboardWired) return;
   keyboardWired = true;
   window.addEventListener('keydown', (e) => {
-    if (commentsOpen || createOpen || reportSheetOpen || adminOpen) return;
+    if (commentsOpen || createOpen || reportSheetOpen || feedbackOpen || adminOpen) return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'j') {
       e.preventDefault();
       const current = currentIndexFromScroll();
@@ -4046,35 +4051,104 @@ function wireSearch() {
 }
 
 const PROFILE_ORIGIN = 'https://omgithub.com/';
+/** Shared top-right dropdown (signed-in avatar menu and guest menu). */
+function headerMenu(btn, menuId) {
+  const wrap = document.createElement('div');
+  wrap.className = 'avatar-wrap';
+  btn.setAttribute('aria-haspopup', 'menu'); btn.setAttribute('aria-expanded', 'false');
+  const menu = document.createElement('div');
+  menu.className = 'avatar-menu'; menu.id = menuId; menu.setAttribute('role', 'menu'); menu.hidden = true;
+  const item = (label, href, cls) => { const a = document.createElement(href ? 'a' : 'button'); if (href) a.href = href; else a.type = 'button'; a.className = 'avatar-item ' + cls; a.setAttribute('role', 'menuitem'); a.textContent = label; menu.append(a); return a; };
+  const setOpen = (on) => { menu.hidden = !on; btn.setAttribute('aria-expanded', on ? 'true' : 'false'); if (on) wrap.dispatchEvent(new Event('menuopen')); };
+  btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setOpen(menu.hidden); });
+  menu.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('pointerdown', (e) => { if (wrap.isConnected && !menu.hidden && !wrap.contains(e.target)) setOpen(false); }, true);
+  document.addEventListener('keydown', (e) => { if (wrap.isConnected && e.key === 'Escape' && !menu.hidden) { setOpen(false); btn.focus(); } });
+  wrap.append(btn, menu);
+  const action = (label, cls, fn) => { const a = item(label, '', cls); a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setOpen(false); fn(); }); return a; };
+  return { wrap, menu, item, action, setOpen };
+}
+
+const PERSON_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4.5 20.5c1.2-3.8 4-5.5 7.5-5.5s6.3 1.7 7.5 5.5"/></svg>';
+let guestMenuWrap = null;
+/** Guests: a plain person icon replaces the Liked heart → Sign in (omgithub hosts) · Likes · Feedback.
+ * When the menu would only hold Likes (lolgames.net with attachments off) the heart stays. */
+function wireGuestMenu() {
+  if (!likedToggleEl || guestMenuWrap) return;
+  const signIn = commentsApi.canSignIn();
+  if (!signIn && !attachEnabled()) return;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'filter-btn search-btn guest-btn'; b.id = 'guestBtn';
+  b.setAttribute('aria-label', 'Menu'); b.title = 'Menu';
+  b.innerHTML = PERSON_SVG;
+  const m = headerMenu(b, 'guestMenu');
+  if (signIn) {
+    const a = m.item('Sign in', commentsApi.signInUrl(window.location.href), 'sign-in');
+    m.wrap.addEventListener('menuopen', () => { a.href = commentsApi.signInUrl(historyUrlFor(currentGameId())); });
+  }
+  m.action('Likes', 'likes', () => applyLikedFilter(!activeLiked));
+  if (attachEnabled()) m.action('Feedback', 'feedback', openFeedback);
+  likedToggleEl.after(m.wrap);
+  likedToggleEl.hidden = true;
+  likedToggleEl.style.display = 'none';
+  guestMenuWrap = m.wrap;
+}
+
 /** Signed-in (omgithub sign-in hosts): GitHub avatar replaces the Liked toggle and opens a small menu. */
 async function wireAvatarMenu() {
   if (!likedToggleEl || !commentsApi.canSignIn()) return;
   const me = await admin.fetchMe();
   if (!me.signedIn) return;
-  const wrap = document.createElement('div');
-  wrap.className = 'avatar-wrap';
   const b = document.createElement('button');
   b.type = 'button'; b.className = 'filter-btn avatar-btn'; b.id = 'avatarBtn';
-  b.setAttribute('aria-haspopup', 'menu'); b.setAttribute('aria-expanded', 'false');
   b.setAttribute('aria-label', `Account menu${me.login ? ' for ' + me.login : ''}`); b.title = me.login || 'Account';
   if (me.avatarUrl) { const img = document.createElement('img'); img.src = me.avatarUrl; img.alt = ''; img.referrerPolicy = 'no-referrer'; b.append(img); }
   else b.textContent = (me.login || '?').slice(0, 1).toUpperCase();
-  const menu = document.createElement('div');
-  menu.className = 'avatar-menu'; menu.id = 'avatarMenu'; menu.setAttribute('role', 'menu'); menu.hidden = true;
-  const item = (label, href, cls) => { const a = document.createElement(href ? 'a' : 'button'); if (href) a.href = href; else a.type = 'button'; a.className = 'avatar-item ' + cls; a.setAttribute('role', 'menuitem'); a.textContent = label; menu.append(a); return a; };
-  item('My projects', PROFILE_ORIGIN + '#your-projects', 'my-projects');
-  if (me.login) item('Public profile', PROFILE_ORIGIN + encodeURIComponent(me.login), 'profile');
-  const likes = item('Likes', '', 'likes');
-  wrap.append(b, menu);
-  likedToggleEl.after(wrap);
+  const m = headerMenu(b, 'avatarMenu');
+  m.item('My projects', PROFILE_ORIGIN + '#your-projects', 'my-projects');
+  if (me.login) m.item('Public profile', PROFILE_ORIGIN + encodeURIComponent(me.login), 'profile');
+  m.action('Likes', 'likes', () => applyLikedFilter(!activeLiked));
+  if (attachEnabled()) m.action('Feedback', 'feedback', openFeedback);
+  if (guestMenuWrap) { guestMenuWrap.remove(); guestMenuWrap = null; }
+  likedToggleEl.after(m.wrap);
   likedToggleEl.hidden = true;
   likedToggleEl.style.display = 'none';
-  const setOpen = (on) => { menu.hidden = !on; b.setAttribute('aria-expanded', on ? 'true' : 'false'); };
-  b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setOpen(menu.hidden); });
-  likes.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setOpen(false); applyLikedFilter(!activeLiked); });
-  menu.addEventListener('click', (e) => e.stopPropagation());
-  document.addEventListener('pointerdown', (e) => { if (!menu.hidden && !wrap.contains(e.target)) setOpen(false); }, true);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) { setOpen(false); b.focus(); } });
+}
+
+/* ---- Feedback sheet (→ omgithub admin Feedback tab), behind attachEnabled() ---- */
+let feedbackOpen = false;
+function openFeedback() {
+  if (feedbackOpen || !attachEnabled()) return;
+  if (commentsOpen) closeCommentsSheet();
+  if (reportSheetOpen) closeReportSheet();
+  feedbackOpen = true;
+  autoAdvancePaused = true;
+  const gameId = currentGameId();
+  feedback.openFeedbackSheet({
+    gameId,
+    page: historyUrlFor(gameId),
+    onSent: () => {
+      dismissFeedback();
+      showToast('Thanks for the feedback!');
+      analytics.track('feedback', { game_id: gameId });
+    },
+    onDismiss: dismissFeedback,
+  });
+  pushOverlayHistory('feedback');
+  document.body.classList.add('report-open', 'feedback-open');
+  syncSheetKeyboard('feedbackSheet', () => feedbackOpen);
+}
+function closeFeedback() {
+  if (!feedbackOpen) return;
+  feedbackOpen = false;
+  feedback.closeFeedbackSheet();
+  document.body.classList.remove('feedback-open');
+  if (!reportSheetOpen) document.body.classList.remove('report-open');
+  autoAdvancePaused = false;
+}
+function dismissFeedback() {
+  if (history.state && history.state.opus === 'feedback') { history.back(); return; }
+  closeFeedback();
 }
 
 function wireTagFilter() {
@@ -4184,6 +4258,7 @@ async function init() {
   wireSortToggle();
   wireMobileFilter();
   wireTagFilter();
+  wireGuestMenu();
   wireAvatarMenu();
   wireSearch();
   // ?g= wins on every boot. With ?tag= we skip last-seen resume, but must
@@ -4305,6 +4380,7 @@ function openReport(game) {
   }
   if (reportSheetOpen) return;
   if (commentsOpen) closeCommentsSheet();
+  if (feedbackOpen) closeFeedback();
   reportSheetOpen = true;
   autoAdvancePaused = true;
   const visitor = analytics.visitorId();
@@ -4329,31 +4405,32 @@ function openReport(game) {
 
 /* Keep the report sheet above the on-screen keyboard: the app's --kb path (html.app-kb)
  * is handled in CSS; plain web/WebView uses visualViewport like the create sheet. */
-let reportKbWired = false;
-function syncReportKeyboard() {
-  const el = document.getElementById('reportSheet');
+const sheetKbWired = new Set();
+function syncSheetKeyboard(id, isOpen) {
+  const el = document.getElementById(id);
   if (!el) return;
   if (appKbOn) { el.style.removeProperty('--kb'); return; }
   const vv = window.visualViewport;
   const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
   el.style.setProperty('--kb', `${Math.round(kb)}px`);
-  if (!reportKbWired) {
-    reportKbWired = true;
-    const on = () => { if (reportSheetOpen) syncReportKeyboard(); };
+  if (!sheetKbWired.has(id)) {
+    sheetKbWired.add(id);
+    const on = () => { if (isOpen()) syncSheetKeyboard(id, isOpen); };
     vv?.addEventListener('resize', on);
     vv?.addEventListener('scroll', on);
     el.addEventListener('focusin', (e) => {
       if (!e.target.matches('textarea, input')) return;
-      setTimeout(() => { syncReportKeyboard(); e.target.scrollIntoView({ block: 'nearest' }); }, 300);
+      setTimeout(() => { syncSheetKeyboard(id, isOpen); e.target.scrollIntoView({ block: 'nearest' }); }, 300);
     });
   }
 }
+function syncReportKeyboard() { syncSheetKeyboard('reportSheet', () => reportSheetOpen); }
 
 function closeReportSheet() {
   if (!reportSheetOpen) return;
   reportSheetOpen = false;
   reports.closeReportSheet();
-  document.body.classList.remove('report-open');
+  if (!feedbackOpen) document.body.classList.remove('report-open');
   autoAdvancePaused = false;
 }
 
@@ -4372,7 +4449,7 @@ function reportDescHtml(game) {
     ? `<a class="report-who" href="https://omgithub.com/${encodeURIComponent(x.login)}" target="_blank" rel="noopener">${x.avatar_url ? `<img src="${escapeHtml(x.avatar_url)}" alt="" width="16" height="16" referrerpolicy="no-referrer">` : ''}@${escapeHtml(x.login)}</a>`
     : '<span class="report-who guest">guest</span>';
   return `<div class="desc report-desc"><p class="report-head">${escapeHtml(head)}</p>${items
-    .map((x) => `<p class="report-line">${who(x)} “${escapeHtml(x.line)}”</p>`)
+    .map((x) => `${x.line ? `<p class="report-line">${who(x)} “${escapeHtml(x.line)}”</p>` : `<p class="report-line">${who(x)}</p>`}${attachmentsHtml(x.attachments)}`)
     .join('')}${more ? `<p class="report-more">+${more} more</p>` : ''}</div>`;
 }
 
