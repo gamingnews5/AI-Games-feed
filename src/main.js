@@ -4071,23 +4071,18 @@ function headerMenu(btn, menuId) {
 
 const PERSON_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4.5 20.5c1.2-3.8 4-5.5 7.5-5.5s6.3 1.7 7.5 5.5"/></svg>';
 let guestMenuWrap = null;
-/** Guests: a plain person icon replaces the Liked heart → Sign in (omgithub hosts) · Likes · Feedback.
- * When the menu would only hold Likes (lolgames.net with attachments off) the heart stays. */
+/** Guests: a plain person icon replaces the Liked heart → Likes · Feedback (no Sign in here; the comments
+ * prompt still offers it). When the menu would only hold Likes (attachments off) the heart stays. */
 function wireGuestMenu() {
   if (!likedToggleEl || guestMenuWrap) return;
-  const signIn = commentsApi.canSignIn();
-  if (!signIn && !attachEnabled()) return;
+  if (!attachEnabled()) return;
   const b = document.createElement('button');
   b.type = 'button'; b.className = 'filter-btn search-btn guest-btn'; b.id = 'guestBtn';
   b.setAttribute('aria-label', 'Menu'); b.title = 'Menu';
   b.innerHTML = PERSON_SVG;
   const m = headerMenu(b, 'guestMenu');
-  if (signIn) {
-    const a = m.item('Sign in', commentsApi.signInUrl(window.location.href), 'sign-in');
-    m.wrap.addEventListener('menuopen', () => { a.href = commentsApi.signInUrl(historyUrlFor(currentGameId())); });
-  }
   m.action('Likes', 'likes', () => applyLikedFilter(!activeLiked));
-  if (attachEnabled()) m.action('Feedback', 'feedback', openFeedback);
+  m.action('Feedback', 'feedback', openFeedback);
   likedToggleEl.after(m.wrap);
   likedToggleEl.hidden = true;
   likedToggleEl.style.display = 'none';
