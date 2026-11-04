@@ -394,13 +394,14 @@ export function mapCatalogToFeed(data) {
     if (platforms) entry.platforms = platforms;
     const engine = typeof g.engine === 'string' ? g.engine.trim() : '';
     const tags = normalizeTags(g.tags);
-    // Engine chip: hide Three.js (too common to be a useful chip/filter) and
+    // Engine chip: hide Three.js (too common to be a useful chip/filter), the catch-all
+    // bucket "Other" (detail lives in engine_detail), and
     // engines already shown as a site tag (e.g. engine "Crayon" + tag "crayon").
     // The catalog keeps the engine field either way.
     const engSlug = engine.toLowerCase().replace(/[\s.-]+/g, '');
     if (
       engine &&
-      !/^(unknown|uncertain|n\/a|none)$/i.test(engine) &&
+      !/^(unknown|uncertain|n\/a|none|other)$/i.test(engine) &&
       engSlug !== 'threejs' &&
       !tags.some((t) => t.replace(/-/g, '') === engSlug)
     ) {
